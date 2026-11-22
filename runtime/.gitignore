@@ -1,0 +1,6 @@
+.private.env
+node_modules/
+*.woff*
+*.ttf
+*.otf
+backups/
