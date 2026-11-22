@@ -22,7 +22,7 @@ services:
     image: ${ACCOUNTING_IMAGE:?verified image required}
     restart: unless-stopped
     env_file: [.private.env]
-    environment: {APP_ORIGIN: 'https://hesab.vesta-cosmetics.ir',PORT: '8080'}
+    environment: {APP_ORIGIN: 'https://hesab.vesta-cosmetics.ir',PORT: '8080',MFA_REQUIRED: '0'}
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]

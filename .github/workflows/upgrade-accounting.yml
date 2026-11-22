@@ -1,0 +1,72 @@
+name: Upgrade Vesta Accounting on the existing host
+on:
+  push:
+    branches: ['product/production-password-auth']
+    paths: ['.github/workflows/upgrade-accounting.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vesta-accounting-host
+  cancel-in-progress: false
+jobs:
+  upgrade:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/production-password-auth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: upgrade_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - name: Verify release against a synthetic PostgreSQL instance
+        env:
+          DATABASE_URL: postgresql://postgres:synthetic-ci-only@127.0.0.1:5432/upgrade_ci
+        run: |
+          npm ci --prefix runtime --ignore-scripts
+          node runtime/acceptance.mjs
+          bash -n runtime/upgrade-host.sh
+      - name: Build only the accounting image
+        run: |
+          docker build -f runtime/Dockerfile -t "vesta-accounting:$GITHUB_SHA" .
+          docker save "vesta-accounting:$GITHUB_SHA" | gzip -1 > "$RUNNER_TEMP/accounting-image.gz"
+      - name: Back up and upgrade only the existing accounting project over pinned SSH
+        env:
+          ADMIN: ${{ secrets.ADMIN }}
+          PASS: ${{ secrets.PASS }}
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - <<'PY'
+          import ipaddress, json, os, pathlib
+          ipaddress.ip_address(os.environ['SERVERIP'])
+          fields = {key: os.environ[key] for key in ('ADMIN','PASS')}
+          assert all(fields.values()) and os.environ['ROOTPASS']
+          (pathlib.Path(os.environ['RUNNER_TEMP'])/'upgrade-login.json').write_text(json.dumps(fields))
+          PY
+          trap 'rm -f -- "$RUNNER_TEMP/upgrade-login.json"' EXIT
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          actual=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$actual" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          target="root@$SERVERIP"
+          sshpass -e ssh "${args[@]}" "$target" 'set -e; test -f /srv/vesta-accounting/private/installed; for p in /srv/vesta-accounting "$(docker info --format "{{.DockerRootDir}}")"; do test "$(df -Pm "$p" | awk "NR==2{print \$4}")" -ge 11776; done; test "$(awk "/^MemAvailable:/{print int(\$2/1024)}" /proc/meminfo)" -ge 2200; echo accounting_upgrade_capacity_verified=true'
+          sshpass -e ssh "${args[@]}" "$target" 'bash -o pipefail -c "gzip -dc | docker load >/dev/null"' < "$RUNNER_TEMP/accounting-image.gz"
+          sshpass -e scp "${args[@]}" runtime/upgrade-host.sh runtime/verify-accounting-login.py "$target:/srv/vesta-accounting/private/"
+          sshpass -e scp "${args[@]}" "$RUNNER_TEMP/upgrade-login.json" "$target:/srv/vesta-accounting/private/upgrade-login.json"
+          sshpass -e ssh "${args[@]}" "$target" "bash /srv/vesta-accounting/private/upgrade-host.sh '$GITHUB_SHA'"
