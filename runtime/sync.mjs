@@ -26,7 +26,28 @@ export async function runCycle(pool,source,{budget=6,delay=1200}={}){
       AND s.expected_count>(SELECT COUNT(*) FROM raw_current c WHERE c.kind=s.kind)`);
   }
   const complete=(await pool.query("SELECT count(*) n FROM sync_state WHERE status='complete'")).rows[0].n;
-  if(Number(complete)===kinds.length){const due=!control.last_success||Date.now()-new Date(control.last_success).getTime()>300000;const weekly=!control.last_scan||Date.now()-new Date(control.last_scan).getTime()>7*86400000;if(!due&&!control.requested&&!weekly)return {idle:true};if(weekly){await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL,watermark=NULL");}else {await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL WHERE kind IN('products','orders','variations','refunds')");}}
+  if(Number(complete)===kinds.length){
+    const due=!control.last_success||Date.now()-new Date(control.last_success).getTime()>300000;
+    const weekly=!control.last_scan||Date.now()-new Date(control.last_scan).getTime()>7*86400000;
+    // New customers, coupon edits and category changes must not wait a week.
+    // Hourly bounded refreshes remain GET-only and preserve immutable raw revisions.
+    const hourly=(await pool.query("SELECT kind FROM sync_state WHERE kind IN('customers','categories','coupons') AND (last_success IS NULL OR last_success<now()-interval '1 hour')")).rows.map(r=>r.kind);
+    const eventKinds=[];
+    if(control.requested){
+      const pending=(await pool.query("SELECT DISTINCT split_part(topic,'.',1) name FROM sync_events WHERE status='pending'")).rows;
+      for(const p of pending){
+        if(p.name==='customer')eventKinds.push('customers');
+        if(p.name==='coupon')eventKinds.push('coupons');
+        if(p.name==='category'||p.name==='product_category')eventKinds.push('categories');
+      }
+    }
+    if(!due&&!control.requested&&!weekly&&hourly.length===0)return {idle:true};
+    if(weekly){await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL,watermark=NULL");}
+    else {
+      if(due||control.requested)await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL WHERE kind IN('products','orders','variations','refunds')");
+      for(const kind of new Set([...hourly,...eventKinds]))await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL WHERE kind=$1",[kind]);
+    }
+  }
   runId=randomUUID();await pool.query("INSERT INTO sync_runs(id,status) VALUES($1,'running')",[runId]);let done=0;
   const failures=[];
   for(const kind of kinds){
