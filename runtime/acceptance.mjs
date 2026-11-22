@@ -34,6 +34,16 @@ try{
  assert.equal((await pool.query("SELECT COUNT(*) n FROM raw_current WHERE kind='categories'")).rows[0].n,1);
  assert.equal((await pool.query("SELECT status FROM sync_state WHERE kind='customers'")).rows[0].status,'complete');
  assert.equal((await pool.query("SELECT expected_count FROM sync_state WHERE kind='customers'")).rows[0].expected_count,1);
+
+ // An hour-old customer snapshot must refresh even when products/orders are not due.
+ await pool.query("UPDATE sync_control SET last_success=now(),last_scan=now(),requested=false WHERE id=1");
+ await pool.query("UPDATE sync_state SET last_success=now()");
+ await pool.query("UPDATE sync_state SET last_success=now()-interval '2 hours' WHERE kind='customers'");
+ const hourlyRefresh=await runCycle(pool,source,{budget:12,delay:0});
+ assert.notEqual(hourlyRefresh.idle,true);
+ assert.equal((await pool.query("SELECT status FROM sync_state WHERE kind='customers'")).rows[0].status,'complete');
+ assert.equal((await pool.query("SELECT last_success>now()-interval '10 minutes' fresh FROM sync_state WHERE kind='customers'")).rows[0].fresh,true);
+
  env.MODE='source';const [sourceDashboard]=await request('/api/dashboard');assert.equal(sourceDashboard.posting_authorized,false);assert.equal(sourceDashboard.integration.orders,1);await request('/api/data/source_orders');const [orderDetail]=await request('/api/source-detail?kind=orders&id=21');assert.equal(orderDetail.record.total,'1230');const [refundDetail]=await request('/api/source-detail?kind=refunds&id=31&parent=21');assert.equal(refundDetail.record.currency,'IRR');await request('/api/source-detail?kind=customers&id=8','GET',null,404);await request('/api/operate','POST',{kind:'sale',ref:'SHOULD-NOT-POST'},403);await request('/api/logout','POST',{});await request('/api/dashboard','GET',null,401);
  assert.equal((await pool.query("SELECT COALESCE(SUM(debit-credit),0) n FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted'")).rows[0].n,0);
  console.log('PostgreSQL runtime acceptance complete:',checks,'HTTP assertions; immutable revisions, signed webhook replay, bounded sync and posting guard passed');
