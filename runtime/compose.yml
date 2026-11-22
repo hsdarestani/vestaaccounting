@@ -1,0 +1,58 @@
+name: vesta-accounting-source
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vesta_accounting
+      POSTGRES_USER: accounting
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?private password required}
+    command: ["postgres","-c","shared_buffers=64MB","-c","max_connections=16","-c","work_mem=2MB","-c","maintenance_work_mem=32MB"]
+    volumes: ["accounting-data:/var/lib/postgresql/data"]
+    mem_limit: 420m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U accounting -d vesta_accounting"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging: {driver: json-file,options: {max-size: 10m,max-file: '3'}}
+    networks: [accounting]
+  app:
+    image: ${ACCOUNTING_IMAGE:?verified image required}
+    restart: unless-stopped
+    env_file: [.private.env]
+    environment: {APP_ORIGIN: 'https://hesab.vesta-cosmetics.ir',PORT: '8080'}
+    ports: ['127.0.0.1:18089:8080']
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.4
+    depends_on: {postgres: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD","node","-e","fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    logging: {driver: json-file,options: {max-size: 10m,max-file: '3'}}
+    networks: [accounting]
+  sync:
+    image: ${ACCOUNTING_IMAGE:?verified image required}
+    restart: unless-stopped
+    env_file: [.private.env]
+    command: ["node","sync.mjs"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 180m
+    cpus: 0.25
+    depends_on: {postgres: {condition: service_healthy}}
+    logging: {driver: json-file,options: {max-size: 10m,max-file: '3'}}
+    networks: [accounting]
+volumes:
+  accounting-data:
+networks:
+  accounting:

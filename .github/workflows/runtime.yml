@@ -1,0 +1,54 @@
+name: PostgreSQL runtime and source synchronization acceptance
+on:
+  push:
+    branches: [main, 'product/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: runtime_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:synthetic-ci-only@127.0.0.1:5432/runtime_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - run: npm ci --prefix runtime --ignore-scripts
+      - run: node runtime/acceptance.mjs
+      - run: docker build -f runtime/Dockerfile -t vesta-accounting-source-ci .
+  configuration-readiness:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - name: Check configured secret availability without outputting secret values
+        env:
+          ADMIN: ${{ secrets.ADMIN }}
+          PASS: ${{ secrets.PASS }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_SSH_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ secrets.HOST }}
+          WOO_KEY: ${{ secrets.WOO_KEY }}
+          WOO_SECRET: ${{ secrets.WOO_SECRET }}
+          ADMIN_TOTP_SECRET: ${{ secrets.ADMIN_TOTP_SECRET }}
+          TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+        run: |
+          node --input-type=module -e 'import {passwordHash,verifyPassword} from "./runtime/auth.mjs";const configured=!!(process.env.ADMIN&&process.env.PASS);let valid=false;if(configured){try{const h=await passwordHash(process.env.PASS);valid=await verifyPassword(process.env.PASS,h);}catch{}}console.log(JSON.stringify({administrator_configured:configured,administrator_hash_roundtrip:valid,server_host:!!(process.env.SERVER_HOST||process.env.HOST),server_access:!!(process.env.SERVER_SSH_KEY||process.env.SERVER_SSH_PASSWORD),woocommerce_readonly_key_pair:!!(process.env.WOO_KEY&&process.env.WOO_SECRET),mfa_configured:!!process.env.ADMIN_TOTP_SECRET,tunnel_configured:!!process.env.TUNNEL_TOKEN}));'
