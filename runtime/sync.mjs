@@ -17,6 +17,13 @@ export async function runCycle(pool,source,{budget=6,delay=1200}={}){
   for(const kind of kinds)await pool.query('INSERT INTO sync_state(kind) VALUES($1) ON CONFLICT DO NOTHING',[kind]);
   // A verified store never treats a silently empty catalog as a completed import.
   if(source.origin==='https://vesta-cosmetics.ir')await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,watermark=NULL WHERE kind='products' AND status='complete' AND NOT EXISTS(SELECT 1 FROM raw_current WHERE kind='products')");
+  // A previous unordered category/coupon scan could process the same ID twice.
+  // Re-check its initial full-import coverage after deploying stable ID ordering.
+  if(!control.last_success){
+    await pool.query(`UPDATE sync_state s SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL,watermark=NULL,last_error=NULL
+      WHERE s.kind IN('categories','coupons') AND s.status='complete' AND s.expected_count IS NOT NULL
+      AND s.expected_count>(SELECT COUNT(*) FROM raw_current c WHERE c.kind=s.kind)`);
+  }
   const complete=(await pool.query("SELECT count(*) n FROM sync_state WHERE status='complete'")).rows[0].n;
   if(Number(complete)===kinds.length){const due=!control.last_success||Date.now()-new Date(control.last_success).getTime()>300000;const weekly=!control.last_scan||Date.now()-new Date(control.last_scan).getTime()>7*86400000;if(!due&&!control.requested&&!weekly)return {idle:true};if(weekly){await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL,watermark=NULL");}else {await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL WHERE kind IN('products','orders','variations','refunds')");}}
   runId=randomUUID();await pool.query("INSERT INTO sync_runs(id,status) VALUES($1,'running')",[runId]);let done=0;
@@ -64,7 +71,25 @@ export async function runCycle(pool,source,{budget=6,delay=1200}={}){
    if(done>=budget)break;
   }
   await pool.query("UPDATE sync_control SET last_error=(SELECT last_error FROM sync_state WHERE status='failed' AND last_error IS NOT NULL ORDER BY kind LIMIT 1) WHERE id=1");
-  const remaining=Number((await pool.query("SELECT count(*) n FROM sync_state WHERE status<>'complete'")).rows[0].n);if(remaining===0){await pool.query("UPDATE sync_control SET requested=false,last_success=now(),last_scan=CASE WHEN last_scan IS NULL OR last_scan<now()-interval '7 days' THEN now() ELSE last_scan END,last_error=NULL WHERE id=1");await pool.query("UPDATE sync_events SET status='review' WHERE status='pending' AND topic LIKE '%.deleted'");await pool.query("UPDATE sync_events e SET status='processed' WHERE e.status='pending' AND EXISTS(SELECT 1 FROM raw_current c WHERE c.external_id=e.source_id AND c.checked_at>=e.received_at AND ((e.topic LIKE 'product.%' AND c.kind IN('products','variations')) OR (e.topic LIKE 'order.%' AND c.kind='orders') OR (e.topic LIKE 'customer.%' AND c.kind='customers') OR (e.topic LIKE 'coupon.%' AND c.kind='coupons')))");}await pool.query("UPDATE sync_runs SET status=$2,finished=now(),reason=$3 WHERE id=$1",[runId,remaining?'checkpointed':'complete',failures[0]||'']);return {pages:done,remaining,...(failures.length?{retrying:true,reason:failures[0]}:{})};
+  let remaining=Number((await pool.query("SELECT count(*) n FROM sync_state WHERE status<>'complete'")).rows[0].n);
+  // A page-count match is insufficient: default API ordering previously repeated
+  // category IDs. Never certify the first import until distinct source IDs match.
+  if(remaining===0&&!control.last_success){
+    const missing=(await pool.query(`SELECT s.kind FROM sync_state s WHERE s.kind IN
+      ('products','orders','customers','categories','coupons','variations','refunds')
+      AND s.expected_count IS NOT NULL
+      AND s.expected_count>(SELECT COUNT(*) FROM raw_current c WHERE c.kind=s.kind)`)).rows;
+    if(missing.length){
+      for(const x of missing){
+        const retry={page:1,parent:'',last_parent:'0',before:stamp(),parent_count:0,retry_at:Date.now()+300000};
+        await pool.query("UPDATE sync_state SET status='failed',cursor=$2::jsonb,processed_count=0,expected_count=NULL,last_error='identity_coverage_gap' WHERE kind=$1",
+          [x.kind,JSON.stringify(retry)]);
+      }
+      remaining=missing.length;
+      await pool.query("UPDATE sync_control SET last_error='identity_coverage_gap' WHERE id=1");
+    }
+  }
+  if(remaining===0){await pool.query("UPDATE sync_control SET requested=false,last_success=now(),last_scan=CASE WHEN last_scan IS NULL OR last_scan<now()-interval '7 days' THEN now() ELSE last_scan END,last_error=NULL WHERE id=1");await pool.query("UPDATE sync_events SET status='review' WHERE status='pending' AND topic LIKE '%.deleted'");await pool.query("UPDATE sync_events e SET status='processed' WHERE e.status='pending' AND EXISTS(SELECT 1 FROM raw_current c WHERE c.external_id=e.source_id AND c.checked_at>=e.received_at AND ((e.topic LIKE 'product.%' AND c.kind IN('products','variations')) OR (e.topic LIKE 'order.%' AND c.kind='orders') OR (e.topic LIKE 'customer.%' AND c.kind='customers') OR (e.topic LIKE 'coupon.%' AND c.kind='coupons')))");}await pool.query("UPDATE sync_runs SET status=$2,finished=now(),reason=$3 WHERE id=$1",[runId,remaining?'checkpointed':'complete',failures[0]||'']);return {pages:done,remaining,...(failures.length?{retrying:true,reason:failures[0]}:{})};
  }catch(e){if(runId)await pool.query("UPDATE sync_runs SET status='failed',finished=now(),reason=$2 WHERE id=$1",[runId,safeReason(e)]);return {failed:true,reason:safeReason(e)};}finally{try{await lock.query('SELECT pg_advisory_unlock(67226611)');}finally{lock.release();}}
 }
 if(process.argv[1]&&import.meta.url===new URL('file:'+process.argv[1]).href){const pool=poolFromEnv();let source;try{source=new WooSource({origin:process.env.WOO_ORIGIN,key:process.env.WOO_KEY,secret:process.env.WOO_SECRET,pageSize:30,catalogAdapter:process.env.WOO_CATALOG_ADAPTER==='1'});}catch{await pool.query("UPDATE sync_control SET last_error='read_only_credentials_missing' WHERE id=1");await pool.end();process.exit(2);}for(;;){const result=await runCycle(pool,source,{budget:9,delay:1800});console.log(JSON.stringify({event:'source_sync',...result}));await sleep(result.failed?90000:result.idle?60000:25000);}}
