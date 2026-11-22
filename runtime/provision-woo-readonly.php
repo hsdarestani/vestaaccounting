@@ -21,6 +21,20 @@ foreach (array('product','product_variation','shop_order','shop_coupon','shop_or
     if ($object && isset($object->cap->read_private_posts)) $caps[$object->cap->read_private_posts] = true;
 }
 $role = get_role($role_slug);
+$taxonomy = get_taxonomy('product_cat');
+if (!$taxonomy || empty($taxonomy->cap->manage_terms) ||
+    $taxonomy->cap->manage_terms === $taxonomy->cap->edit_terms ||
+    $taxonomy->cap->manage_terms === $taxonomy->cap->delete_terms ||
+    $taxonomy->cap->manage_terms === 'manage_options') exit(26);
+$term_reader = $taxonomy->cap->manage_terms;
+// WooCommerce checks a separate management/listing capability for category GETs.
+// Never grant the edit/delete capabilities or change roles of ordinary users.
+if ($role && !array_diff_assoc($role->capabilities,$caps) && !array_diff_assoc($caps,$role->capabilities)) {
+    $members = get_users(array('role' => $role_slug, 'number' => 2, 'fields' => array('user_login')));
+    if (count($members) !== 1 || $members[0]->user_login !== $login) exit(27);
+    $role->add_cap($term_reader);
+}
+$caps[$term_reader] = true;
 if (!$role) $role = add_role($role_slug, 'Vesta Accounting (read-only source)', $caps);
 if (!$role || array_diff_assoc($role->capabilities,$caps) || array_diff_assoc($caps,$role->capabilities)) exit(21);
 $user = get_user_by('login', $login);
@@ -40,11 +54,15 @@ if (!$user || $user->roles !== array($role_slug) || array_diff_key($user->allcap
 global $wpdb;
 $description = 'Vesta Accounting: dedicated read-only synchronization';
 $table = $wpdb->prefix . 'woocommerce_api_keys';
+$wpdb->hide_errors();
+if (getenv('VESTA_READONLY_CHECK_ONLY') === '1') {
+    if ($wpdb->get_var($wpdb->prepare("SELECT permissions FROM `$table` WHERE user_id=%d AND description=%s LIMIT 1", $user->ID, $description)) !== 'read') exit(28);
+    exit(0);
+}
 // Do not rotate an existing integration or create duplicate keys on retry.
 if ($wpdb->get_var($wpdb->prepare("SELECT key_id FROM `$table` WHERE user_id=%d AND description=%s LIMIT 1", $user->ID, $description))) exit(24);
 $key = 'ck_' . wc_rand_hash();
 $secret = 'cs_' . wc_rand_hash();
-$wpdb->hide_errors();
 $added = $wpdb->insert($table, array(
     'user_id' => $user->ID, 'description' => $description, 'permissions' => 'read',
     'consumer_key' => wc_api_hash($key), 'consumer_secret' => $secret,

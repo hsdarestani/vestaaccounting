@@ -2,7 +2,7 @@ name: Enable Vesta Accounting read-only source sync
 on:
   push:
     branches: ['product/production-password-auth']
-    paths: ['.github/workflows/enable-accounting-source.yml']
+    paths: ['.github/workflows/enable-accounting-source.yml', 'runtime/provision-woo-readonly.php']
   workflow_dispatch:
 permissions:
   contents: read

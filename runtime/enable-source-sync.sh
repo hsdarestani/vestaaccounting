@@ -24,6 +24,8 @@ with (private/'.woo.env').open('x') as dest:
     dest.write('WOO_KEY='+keys['key']+'\nWOO_SECRET='+keys['secret']+'\n')
 (private/'woo-key-provision.json').unlink()
 PY
+else
+    docker exec -u www-data -e VESTA_READONLY_CHECK_ONLY=1 -i vc-vesta php -d display_errors=0 -d log_errors=0 < provision-woo-readonly.php >/dev/null 2>&1
 fi
 cd "$ROOT/release/runtime"
 compose() { docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml -f "$ROOT/private/compose.source-sync.yml" --profile source-sync "$@"; }
