@@ -1,0 +1,38 @@
+name: Reclaim only failed accounting release temporary files
+on:
+  push:
+    branches: ["audit/isolated-host-gate-20261122"]
+    paths: [".github/workflows/accounting-temp-cleanup.yml"]
+permissions:
+  contents: read
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Remove only known temporary installation artifacts
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          umask 077
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          test "$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o ConnectTimeout=15 "root@$SERVERIP" 'bash -s' <<'REMOTE'
+          set -eu
+          root=/srv/vesta-accounting
+          test ! -e "$root/private/installed"
+          if docker ps -aq --filter label=com.docker.compose.project=vesta-accounting-source | grep -q .; then echo 'Existing container; cleanup stopped'; exit 45; fi
+          for f in "$root/release.tar.gz" "$root/image.tar.gz"; do
+            if test -f "$f" && test ! -L "$f"; then rm -- "$f"; fi
+          done
+          echo 'Temporary release archives removed; no datastore removed'
+          if docker image inspect vesta-accounting:e74033b020c61b77a25eeccc012a7bb4ec64dd5d >/dev/null 2>&1; then
+            docker image rm vesta-accounting:e74033b020c61b77a25eeccc012a7bb4ec64dd5d >/dev/null || true
+          fi
+          disk=$(df -Pm "$root" | awk 'NR==2{print $4}')
+          if [ "$disk" -ge 15000 ]; then echo disk_gate_after_cleanup=pass; else echo disk_gate_after_cleanup=fail; fi
+          REMOTE
