@@ -1,0 +1,37 @@
+name: Audit Vesta Accounting live source import (read-only)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'product/source-readiness-audit']
+    paths:
+      - '.github/workflows/audit-accounting-source.yml'
+      - 'runtime/source-readiness-audit.sh'
+  schedule:
+    - cron: '17 */6 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: accounting-source-readiness
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check read-only audit script syntax
+        run: bash -n runtime/source-readiness-audit.sh
+      - name: Inspect accounting PostgreSQL without financial writes or private data exports
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$SERVERIP" && test -n "$ROOTPASS"
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          fingerprint=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$fingerprint" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          sshpass -e ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=yes             -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known"             -o PreferredAuthentications=password -o PubkeyAuthentication=no             "root@$SERVERIP" 'bash -s' < runtime/source-readiness-audit.sh
