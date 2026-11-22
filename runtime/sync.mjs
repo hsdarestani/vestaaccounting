@@ -17,11 +17,12 @@ export async function runCycle(pool,source,{budget=6,delay=1200}={}){
   for(const kind of kinds)await pool.query('INSERT INTO sync_state(kind) VALUES($1) ON CONFLICT DO NOTHING',[kind]);
   // A verified store never treats a silently empty catalog as a completed import.
   if(source.origin==='https://vesta-cosmetics.ir')await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,watermark=NULL WHERE kind='products' AND status='complete' AND NOT EXISTS(SELECT 1 FROM raw_current WHERE kind='products')");
-  // A previous unordered category/coupon scan could process the same ID twice.
-  // Re-check its initial full-import coverage after deploying stable ID ordering.
+  // Offset pages can overlap while the source changes. A completed collection is
+  // not complete unless all expected distinct source identities were actually stored.
+  // Re-run deficient top-level collections idempotently without discarding evidence.
   if(!control.last_success){
     await pool.query(`UPDATE sync_state s SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL,watermark=NULL,last_error=NULL
-      WHERE s.kind IN('categories','coupons') AND s.status='complete' AND s.expected_count IS NOT NULL
+      WHERE s.kind IN('products','orders','customers','categories','coupons') AND s.status='complete' AND s.expected_count IS NOT NULL
       AND s.expected_count>(SELECT COUNT(*) FROM raw_current c WHERE c.kind=s.kind)`);
   }
   const complete=(await pool.query("SELECT count(*) n FROM sync_state WHERE status='complete'")).rows[0].n;
