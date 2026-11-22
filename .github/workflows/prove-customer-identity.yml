@@ -1,0 +1,33 @@
+name: Audit source customer identity coverage (read-only)
+on:
+  push:
+    branches: ['fix/source-identity-proof']
+    paths:
+      - '.github/workflows/prove-customer-identity.yml'
+      - 'runtime/customer-identity-proof.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check audit code
+        run: |
+          node --check runtime/customer-identity-proof.mjs
+          bash -n runtime/customer-identity-proof.sh
+      - name: Read-only full source versus PostgreSQL customer identity check
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          fingerprint=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$fingerprint" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          sshpass -e ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=yes             -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known"             -o PreferredAuthentications=password -o PubkeyAuthentication=no             "root@$SERVERIP" 'bash -s' < runtime/customer-identity-proof.sh
