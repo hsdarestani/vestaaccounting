@@ -76,4 +76,31 @@ for (const kind of kinds) {
   }
 }
 NODE
+# Probe documented stable ID ordering without exposing any object or customer identifiers.
+compose exec -T sync node --input-type=module <<'NODE'
+const origin=new URL(process.env.WOO_ORIGIN);
+const auth='Basic '+Buffer.from(process.env.WOO_KEY+':'+process.env.WOO_SECRET).toString('base64');
+for(const kind of ['products/categories','coupons']){
+  try {
+    const ids=[];
+    let total=null;
+    for(const page of [1,2]){
+      const u=new URL('/wp-json/wc/v3/'+kind,origin);
+      u.search=new URLSearchParams({page:String(page),per_page:'30',orderby:'id',order:'asc',_fields:'id'}).toString();
+      const r=await fetch(u,{method:'GET',redirect:'error',headers:{Authorization:auth,Accept:'application/json'},signal:AbortSignal.timeout(15000)});
+      if(!r.ok)throw Error('http_'+r.status);
+      const rows=await r.json();
+      if(!Array.isArray(rows))throw Error('invalid_response');
+      total=Number(r.headers.get('X-WP-Total'));
+      ids.push(...rows.map(x=>x.id));
+      if(rows.length<30)break;
+    }
+    const unique=new Set(ids).size===ids.length;
+    const ascending=ids.every((v,i)=>i===0||v>ids[i-1]);
+    console.log('stable_order_probe='+kind+' supported=true ascending='+ascending+' unique='+unique+' sample='+ids.length+' total='+total);
+  }catch(e){
+    console.log('stable_order_probe='+kind+' supported=false error='+(/^http_[0-9]{3}$/.test(e.message)?e.message:'probe_failed'));
+  }
+}
+NODE
 echo "accounting_source_audit=end"
