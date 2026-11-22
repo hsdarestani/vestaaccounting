@@ -1,7 +1,7 @@
 name: Deploy isolated PostgreSQL source runtime (guarded)
 on:
   push:
-    branches: ['product/real-migration']
+    branches: ['product/host-install-stream']
     paths: ['.github/workflows/deploy-source.yml']
   workflow_dispatch:
 permissions:
@@ -33,7 +33,7 @@ jobs:
       - run: bash -n runtime/install-host.sh
   deploy:
     needs: verify
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/real-migration'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/host-install-stream'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -88,7 +88,9 @@ jobs:
           PY
           args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
           target="root@$SERVERIP"
-          sshpass -e ssh "${args[@]}" "$target" 'umask 077; mkdir -p /srv/vesta-accounting; chmod 700 /srv/vesta-accounting'
-          sshpass -e scp "${args[@]}" "$RUNNER_TEMP/release.tar.gz" "$RUNNER_TEMP/image.tar.gz" "$RUNNER_TEMP/bootstrap.json" runtime/install-host.sh "$target:/srv/vesta-accounting/"
+          sshpass -e ssh "${args[@]}" "$target" 'set -eu; umask 077; mkdir -p /srv/vesta-accounting; chmod 700 /srv/vesta-accounting; test ! -e /srv/vesta-accounting/private/installed; test "$(df -Pm /srv/vesta-accounting | awk "NR==2{print \$4}")" -ge 15000; test "$(awk "/^MemAvailable:/{print int(\$2/1024)}" /proc/meminfo)" -ge 3000; echo pre_transfer_capacity=pass'
+          # Stream the exact CI-built image bundle without an extra remote tar copy.
+          sshpass -e ssh "${args[@]}" "$target" 'set -o pipefail; gzip -dc | docker load >/dev/null; echo image_bundle_loaded=true' < "$RUNNER_TEMP/image.tar.gz"
+          sshpass -e scp "${args[@]}" "$RUNNER_TEMP/release.tar.gz" "$RUNNER_TEMP/bootstrap.json" runtime/install-host.sh "$target:/srv/vesta-accounting/"
           sshpass -e ssh "${args[@]}" "$target" 'bash /srv/vesta-accounting/install-host.sh'
         # No DNS changes and no storefront containers are restarted by this workflow.
