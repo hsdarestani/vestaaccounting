@@ -9,7 +9,7 @@ FROM sync_state WHERE kind IN ('products','orders','customers','categories','cou
 SQL
 compose exec -T sync node --input-type=module <<'NODE'
 import {WooSource} from './source.mjs';
-const source = new WooSource({origin:process.env.WOO_ORIGIN,key:process.env.WOO_KEY,secret:process.env.WOO_SECRET,pageSize:1});
+const source = new WooSource({origin:process.env.WOO_ORIGIN,key:process.env.WOO_KEY,secret:process.env.WOO_SECRET,pageSize:1,catalogAdapter:process.env.WOO_CATALOG_ADAPTER==='1'});
 const safe = e=>/^woo_http_\d{3}$/.test(e.message)?e.message:e.message==='pagination headers missing'?'pagination_headers_missing':e.name==='TimeoutError'?'timeout':'source_response_error';
 for(const [name,kind,opts] of [['catalog','products',{}],['catalog_date_bound','products',{before:new Date().toISOString().replace(/\.\d{3}Z$/,'Z')}],['customers','customers',{}],['coupons','coupons',{}]]) {
   try{const result=await source.page(kind,1,opts);console.log('source_probe='+name+':'+(result.rows.length?'response_has_records':'response_empty'));}

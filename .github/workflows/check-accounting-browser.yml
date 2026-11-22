@@ -24,6 +24,7 @@ jobs:
           ADMIN: ${{ secrets.ADMIN }}
           PASS: ${{ secrets.PASS }}
           CHROME_PATH: /usr/bin/google-chrome
+          EXPECT_PRIVATE_SYNC_TOTALS: '1'
         run: |
           set -euo pipefail
           BROWSER_OUTPUT="$RUNNER_TEMP/vesta-screenshots" PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright" node runtime/browser-smoke.mjs

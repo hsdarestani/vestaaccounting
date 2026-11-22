@@ -66,6 +66,11 @@ try {
       assert.equal(await page.locator('#detail').getAttribute('hidden'),'');
       console.log('browser_real_order_detail_verified=true');
     }
+    if(view==='integration'&&process.env.EXPECT_PRIVATE_SYNC_TOTALS==='1'){
+      await page.locator('#content .table').getByText('تعداد رکوردهای ذخیره‌شده در PostgreSQL',{exact:true}).first().waitFor();
+      assert.equal(await page.locator('#content .table').getByText('تعداد رکوردهای ذخیره‌شده در PostgreSQL',{exact:true}).count(),7);
+      console.log('browser_authenticated_sync_totals_verified=true');
+    }
   }
   phase='logout';
   await page.locator('#logout').click();
