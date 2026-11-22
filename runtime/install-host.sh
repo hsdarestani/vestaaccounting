@@ -4,7 +4,7 @@ set -Eeuo pipefail
 umask 077
 ROOT=/srv/vesta-accounting
 cd "$ROOT"
-test -s release.tar.gz && test -s bootstrap.json && test -s image.tar.gz
+test -s release.tar.gz && test -s bootstrap.json
 trap 'rm -f "$ROOT/bootstrap.json"' EXIT
 available=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)
 disk=$(df -Pm "$ROOT" | awk 'NR==2{print $4}')
@@ -17,7 +17,9 @@ mkdir -p release private backups
 test ! -e "$ROOT/private/installed" || { echo 'Existing healthy installation; reviewed upgrade required'; exit 44; }
 if docker ps -aq --filter label=com.docker.compose.project=vesta-accounting-source | grep -q .; then echo 'Partial container installation exists; inspect before retry'; exit 45; fi
 tar -xzf release.tar.gz -C release
-gzip -dc image.tar.gz | docker load >/dev/null
+release_id=$(python3 -c 'import json; print(json.load(open("bootstrap.json"))["RELEASE"])')
+[[ "$release_id" =~ ^[0-9a-f]{40}$ ]]
+docker image inspect "vesta-accounting:$release_id" postgres:16-alpine nginx:1.27-alpine >/dev/null
 cd release/runtime
 python3 - "$ROOT/bootstrap.json" "$ROOT" <<'PY'
 import json, pathlib, re, secrets, sys, os
@@ -65,6 +67,6 @@ else:
     print('MFA configured; interactive owner verification required')
 PY
 # Explicit source synchronization is authorized, but only start after separate release gate.
-rm -f "$ROOT/release.tar.gz" "$ROOT/image.tar.gz"
+rm -f "$ROOT/release.tar.gz"
 touch "$ROOT/private/installed"
 echo 'Private installation healthy; no public routing or source import enabled. MFA is required before public route.'
