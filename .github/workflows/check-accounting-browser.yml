@@ -2,7 +2,7 @@ name: Verify the public Vesta Accounting browser experience
 on:
   push:
     branches: ['product/production-password-auth']
-    paths: ['.github/workflows/check-accounting-browser.yml']
+    paths: ['.github/workflows/check-accounting-browser.yml', 'runtime/browser-smoke.mjs']
   workflow_dispatch:
 permissions:
   contents: read
