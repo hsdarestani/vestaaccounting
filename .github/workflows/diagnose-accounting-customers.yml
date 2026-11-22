@@ -1,0 +1,32 @@
+name: Diagnose WooCommerce customer pagination safely
+on:
+  workflow_dispatch:
+  push:
+    branches: ['product/customer-pagination-proof']
+    paths:
+      - '.github/workflows/diagnose-accounting-customers.yml'
+      - 'runtime/diagnose-customer-pagination.sh'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check diagnostic script syntax
+        run: bash -n runtime/diagnose-customer-pagination.sh
+      - name: Validate customer pagination in read-only mode
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVERIP" && test -n "$ROOTPASS"
+          umask 077
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          fingerprint=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$fingerprint" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          sshpass -e ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=yes             -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known"             -o PreferredAuthentications=password -o PubkeyAuthentication=no             "root@$SERVERIP" 'bash -s' < runtime/diagnose-customer-pagination.sh
