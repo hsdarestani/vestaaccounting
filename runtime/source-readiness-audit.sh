@@ -51,4 +51,29 @@ SELECT 'recent_run='||status||' at='||to_char(started AT TIME ZONE 'UTC','YYYY-M
 FROM sync_runs ORDER BY started DESC LIMIT 1;
 COMMIT;
 SQL
+# Sample only two pages per kind. Output aggregate ordering signals, never record identities.
+compose exec -T sync node --input-type=module <<'NODE'
+import {WooSource} from './source.mjs';
+const source = new WooSource({
+  origin:process.env.WOO_ORIGIN, key:process.env.WOO_KEY,
+  secret:process.env.WOO_SECRET,pageSize:30,
+  catalogAdapter:process.env.WOO_CATALOG_ADAPTER==='1'
+});
+const kinds=['products','orders','customers','categories','coupons'];
+for (const kind of kinds) {
+  try {
+    const a=await source.page(kind,1,{});
+    const b=a.pages>=2?await source.page(kind,2,{}):{rows:[]};
+    const ids=[...a.rows,...b.rows].map(x=>x.id);
+    const monotonic=ids.every((id,i)=>i===0||ids[i-1]<id);
+    const unique=new Set(ids).size===ids.length;
+    console.log('pagination_probe='+kind+
+      ' monotonic_id='+monotonic+' unique_id='+unique+
+      ' sample_records='+ids.length+' source_total='+a.total);
+  } catch(e) {
+    const cls=/^woo_http_[0-9]{3}$/.test(e.message)?e.message:'source_probe_error';
+    console.log('pagination_probe='+kind+' error='+cls);
+  }
+}
+NODE
 echo "accounting_source_audit=end"
