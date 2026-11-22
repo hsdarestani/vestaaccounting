@@ -1,5 +1,7 @@
 # Vesta Accounting — evaluation foundation
 
+The live synthetic evaluation is implemented in [edge-demo](edge-demo/README.md). It preserves the original foundation and keeps all real storefront integrations and production financial posting disabled.
+
 **Release 0.1.0: independent accounting foundation, not production software.** This repository contains code and synthetic fixtures only. Do not use real customer data or connect live financial workflows to this release. Nothing here changes an external store or legacy accounting integration.
 
 ## Run isolated development
