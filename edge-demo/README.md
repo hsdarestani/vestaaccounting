@@ -13,7 +13,7 @@ This independent evaluation uses Cloudflare Workers and D1, intentionally not th
 
 ## Tests
 
-`node edge-demo/test.mjs` runs through the Worker request handler with a local transactional SQLite binding double, including 103 HTTP request assertions, seeded financial scenarios, journal and stock reconciliation, duplicate protection, period locking, and viewer authorization. Deployed D1 needs its own acceptance tests. Python foundation suite: `python -m unittest discover -s tests -q`.
+`node edge-demo/test.mjs` runs through the Worker request handler with a local transactional SQLite binding double, including seeded financial scenarios, journal and stock reconciliation, financial statements, duplicate protection, period locking, and viewer authorization. Deployed D1 needs its own acceptance tests. Python foundation suite: `python -m unittest discover -s tests -q`.
 
 ## Provisional accounting policies
 
