@@ -1,0 +1,92 @@
+name: Deploy isolated PostgreSQL source runtime (guarded)
+on:
+  push:
+    branches: ['product/real-migration']
+    paths: ['.github/workflows/deploy-source.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: deployment_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:synthetic-ci-only@127.0.0.1:5432/deployment_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - run: npm ci --prefix runtime --ignore-scripts
+      - run: node runtime/acceptance.mjs
+      - run: bash -n runtime/install-host.sh
+  deploy:
+    needs: verify
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/real-migration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail closed before any connection if a required secret is missing
+        env:
+          ADMIN: ${{ secrets.ADMIN }}
+          PASS: ${{ secrets.PASS }}
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          python3 - <<'PY'
+          import os,re,sys
+          required=['ADMIN','PASS','SERVERIP','ROOTPASS']
+          missing=[k for k in required if not os.environ.get(k)]
+          if missing: sys.exit('Missing configured secret identifiers: '+', '.join(missing))
+          import ipaddress
+          try: ipaddress.ip_address(os.environ['SERVERIP'])
+          except ValueError: sys.exit('Invalid server IP configuration')
+          PY
+      - name: Build immutable release on CI, not the storefront host
+        run: |
+          docker build -f runtime/Dockerfile -t "vesta-accounting:$RELEASE" .
+          docker save "vesta-accounting:$RELEASE" | gzip -1 > "$RUNNER_TEMP/image.tar.gz"
+          tar -czf "$RUNNER_TEMP/release.tar.gz" runtime edge-demo
+      - name: Transfer privately over verified SSH and install isolated service
+        env:
+          ADMIN: ${{ secrets.ADMIN }}
+          PASS: ${{ secrets.PASS }}
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+          WOO_KEY: ${{ secrets.WOO_KEY }}
+          WOO_SECRET: ${{ secrets.WOO_SECRET }}
+          WOO_WEBHOOK_SECRET: ${{ secrets.WOO_WEBHOOK_SECRET }}
+          ADMIN_TOTP_SECRET: ${{ secrets.ADMIN_TOTP_SECRET }}
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          actual=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$actual" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k' || { echo 'SSH host fingerprint mismatch; stopped'; exit 1; }
+          export SSHPASS="$ROOTPASS"
+          python3 - <<'PY'
+          import json,os,pathlib
+          keys=['ADMIN','PASS','WOO_KEY','WOO_SECRET','WOO_WEBHOOK_SECRET','ADMIN_TOTP_SECRET','RELEASE']
+          (pathlib.Path(os.environ['RUNNER_TEMP'])/'bootstrap.json').write_text(json.dumps({k:os.environ[k] for k in keys}))
+          PY
+          args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          target="root@$SERVERIP"
+          sshpass -e ssh "${args[@]}" "$target" 'umask 077; mkdir -p /srv/vesta-accounting; chmod 700 /srv/vesta-accounting'
+          sshpass -e scp "${args[@]}" "$RUNNER_TEMP/release.tar.gz" "$RUNNER_TEMP/image.tar.gz" "$RUNNER_TEMP/bootstrap.json" runtime/install-host.sh "$target:/srv/vesta-accounting/"
+          sshpass -e ssh "${args[@]}" "$target" 'bash /srv/vesta-accounting/install-host.sh'
+        # No DNS changes and no storefront containers are restarted by this workflow.

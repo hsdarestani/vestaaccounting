@@ -23,7 +23,6 @@ services:
     restart: unless-stopped
     env_file: [.private.env]
     environment: {APP_ORIGIN: 'https://hesab.vesta-cosmetics.ir',PORT: '8080'}
-    ports: ['127.0.0.1:18089:8080']
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -41,6 +40,7 @@ services:
   sync:
     image: ${ACCOUNTING_IMAGE:?verified image required}
     restart: unless-stopped
+    profiles: [source-sync]
     env_file: [.private.env]
     command: ["node","sync.mjs"]
     read_only: true
@@ -51,6 +51,16 @@ services:
     cpus: 0.25
     depends_on: {postgres: {condition: service_healthy}}
     logging: {driver: json-file,options: {max-size: 10m,max-file: '3'}}
+    networks: [accounting]
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports: ['127.0.0.1:18089:8080']
+    volumes: ['./nginx.conf:/etc/nginx/conf.d/default.conf:ro']
+    mem_limit: 48m
+    cpus: 0.1
+    depends_on: {app: {condition: service_healthy}}
+    logging: {driver: json-file,options: {max-size: 5m,max-file: '2'}}
     networks: [accounting]
 volumes:
   accounting-data:

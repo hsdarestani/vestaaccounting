@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS raw_revisions(id bigint GENERATED ALWAYS AS IDENTITY 
 CREATE INDEX IF NOT EXISTS raw_revisions_identity ON raw_revisions(kind,external_id,parent_id);
 DROP TRIGGER IF EXISTS raw_guard ON raw_revisions;
 CREATE TRIGGER raw_guard BEFORE UPDATE OR DELETE ON raw_revisions FOR EACH ROW EXECUTE FUNCTION runtime_immutable();
-CREATE TABLE IF NOT EXISTS raw_current(kind text NOT NULL,external_id text NOT NULL,parent_id text NOT NULL DEFAULT '',revision_id bigint NOT NULL REFERENCES raw_revisions(id),modified text,PRIMARY KEY(kind,external_id,parent_id));
+CREATE TABLE IF NOT EXISTS raw_current(kind text NOT NULL,external_id text NOT NULL,parent_id text NOT NULL DEFAULT '',revision_id bigint NOT NULL REFERENCES raw_revisions(id),modified text,checked_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(kind,external_id,parent_id));
+ALTER TABLE raw_current ADD COLUMN IF NOT EXISTS checked_at timestamptz NOT NULL DEFAULT now();
 CREATE TABLE IF NOT EXISTS sync_state(kind text PRIMARY KEY,watermark text,cursor jsonb,status text NOT NULL DEFAULT 'pending',last_success timestamptz,expected_count bigint,processed_count bigint NOT NULL DEFAULT 0,last_error text);
 CREATE TABLE IF NOT EXISTS sync_runs(id text PRIMARY KEY,started timestamptz NOT NULL DEFAULT now(),finished timestamptz,status text NOT NULL,reason text NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS sync_events(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,event_key text NOT NULL UNIQUE,topic text NOT NULL,fingerprint text NOT NULL,source_id text NOT NULL,received_at timestamptz NOT NULL DEFAULT now(),status text NOT NULL DEFAULT 'pending' CHECK(status IN('pending','processed','review')),attempts integer NOT NULL DEFAULT 0);

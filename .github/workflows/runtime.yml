@@ -29,6 +29,13 @@ jobs:
         with: {node-version: '24'}
       - run: npm ci --prefix runtime --ignore-scripts
       - run: node runtime/acceptance.mjs
+      - name: Backup and restore actual synthetic PostgreSQL data
+        run: |
+          id='${{ job.services.postgres.id }}'
+          docker exec "$id" pg_dump -U postgres -Fc runtime_ci > "$RUNNER_TEMP/runtime_ci.dump"
+          docker exec "$id" createdb -U postgres runtime_restore
+          docker exec -i "$id" pg_restore -U postgres -d runtime_restore --exit-on-error < "$RUNNER_TEMP/runtime_ci.dump"
+          docker exec "$id" psql -U postgres -d runtime_restore -v ON_ERROR_STOP=1 -tAc "SELECT CASE WHEN (SELECT COALESCE(sum(debit-credit),0) FROM lines JOIN journals ON journals.id=lines.journal WHERE status='posted')=0 AND (SELECT count(*) FROM raw_current)>0 THEN 'restored-and-balanced' ELSE 'restore-check-failed' END" | grep -Fx restored-and-balanced
       - run: docker build -f runtime/Dockerfile -t vesta-accounting-source-ci .
   configuration-readiness:
     if: github.event_name == 'push'

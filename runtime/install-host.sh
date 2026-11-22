@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Isolated host installation only. No storefront paths, Docker networks, DNS or finance writes.
+set -Eeuo pipefail
+umask 077
+ROOT=/srv/vesta-accounting
+cd "$ROOT"
+test -s release.tar.gz && test -s bootstrap.json && test -s image.tar.gz
+trap 'rm -f "$ROOT/bootstrap.json"' EXIT
+available=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)
+disk=$(df -Pm "$ROOT" | awk 'NR==2{print $4}')
+cores=$(nproc)
+load=$(awk '{print $1}' /proc/loadavg)
+if (( available < 3000 || disk < 15000 )); then echo 'Capacity gate failed: memory or disk';exit 41;fi
+awk -v l="$load" -v c="$cores" 'BEGIN{exit !(l<c*0.8)}' || { echo 'Capacity gate failed: CPU load'; exit 42; }
+vmstat 1 3 | tail -1 | awk '{exit !($7==0&&$8==0)}' || { echo 'Capacity gate failed: active swap I/O';exit 43; }
+mkdir -p release private backups
+tar -xzf release.tar.gz -C release
+gzip -dc image.tar.gz | docker load >/dev/null
+cd release/runtime
+python3 - "$ROOT/bootstrap.json" "$ROOT" <<'PY'
+import json, pathlib, re, secrets, sys, os
+p=pathlib.Path(sys.argv[1]); root=pathlib.Path(sys.argv[2]); d=json.loads(p.read_text())
+for k in ('WOO_KEY','WOO_SECRET','ADMIN_TOTP_SECRET','WOO_WEBHOOK_SECRET'):
+    if d.get(k) and not re.fullmatch(r'[A-Za-z0-9_\-=]{16,256}',d[k]): raise SystemExit('Invalid private integration configuration')
+if not re.fullmatch(r'[0-9a-f]{40}',d.get('RELEASE','')): raise SystemExit('Invalid release identity')
+env=root/'private'/'.private.env'; db=root/'private'/'.compose.env'
+if env.exists()!=db.exists(): raise SystemExit('Existing private storage incomplete; no changes')
+if not env.exists():
+    pw=secrets.token_hex(32)
+    mfa='1' if d.get('ADMIN_TOTP_SECRET') else '0'
+    env.write_text('\n'.join([f'DATABASE_URL=postgresql://accounting:{pw}@postgres:5432/vesta_accounting',f'IP_SALT={secrets.token_hex(32)}',f'MFA_REQUIRED={mfa}',f'ADMIN_TOTP_SECRET={d.get("ADMIN_TOTP_SECRET","")}','WOO_ORIGIN=https://vesta-cosmetics.ir/',f'WOO_KEY={d.get("WOO_KEY","")}',f'WOO_SECRET={d.get("WOO_SECRET","")}',f'WOO_WEBHOOK_SECRET={d.get("WOO_WEBHOOK_SECRET","")}',f'RELEASE={d["RELEASE"]}'])+'\n');db.write_text(f'POSTGRES_PASSWORD={pw}\nACCOUNTING_IMAGE=vesta-accounting:{d["RELEASE"]}\n')
+else:
+    if f'ACCOUNTING_IMAGE=vesta-accounting:{d["RELEASE"]}\n' not in db.read_text(): raise SystemExit('Different existing release; use reviewed incremental deployment')
+for f in (env,db): os.chmod(f,0o600)
+PY
+if [[ ! -e .private.env ]];then ln -s "$ROOT/private/.private.env" .private.env;fi
+docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml up -d --wait postgres
+docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml run --rm app node migrate.mjs
+python3 - "$ROOT/bootstrap.json" "$ROOT/private/.compose.env" <<'PY'
+import json, os, subprocess, sys
+d=json.load(open(sys.argv[1]));e=dict(os.environ,ADMIN=d['ADMIN'],PASS=d['PASS'])
+subprocess.run(['docker','compose','--env-file',sys.argv[2],'-f','compose.yml','run','--rm','-e','ADMIN','-e','PASS','app','node','provision.mjs'],env=e,check=True)
+PY
+docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml up -d --wait app proxy
+curl -fsS --max-time 10 http://127.0.0.1:18089/health | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["database"]=="postgresql" and d["posting_authorized"] is False;print("Isolated PostgreSQL runtime is healthy")'
+python3 - "$ROOT/bootstrap.json" <<'PY'
+import json,sys,urllib.request
+d=json.load(open(sys.argv[1]))
+if not d.get('ADMIN_TOTP_SECRET'):
+    body=json.dumps({'username':d['ADMIN'],'password':d['PASS']}).encode()
+    req=urllib.request.Request('http://127.0.0.1:18089/api/login',data=body,headers={'Content-Type':'application/json'},method='POST')
+    with urllib.request.urlopen(req,timeout=15) as r:
+        user=json.load(r); assert user['role']=='owner' and user['username']==d['ADMIN']; cookie=r.headers['Set-Cookie'].split(';')[0]
+    logout=urllib.request.Request('http://127.0.0.1:18089/api/logout',data=b'{}',headers={'Content-Type':'application/json','Cookie':cookie,'X-CSRF-Token':user['csrf']},method='POST')
+    with urllib.request.urlopen(logout,timeout=15) as r: assert r.status==200
+    print('private_admin_login_verified=true')
+else:
+    print('MFA configured; interactive owner verification required')
+PY
+# Explicit source synchronization is authorized, but only start after separate release gate.
+rm -f "$ROOT/release.tar.gz" "$ROOT/image.tar.gz"
+echo 'Private installation healthy; no public routing or source import enabled. MFA is required before public route.'
