@@ -14,7 +14,7 @@ Take an authorized read-only audit of the intended host before choosing shared o
 1. Review accounting policy and source ownership; approve opening and cutoff evidence separately. Historical records are references only.
 2. Build PostgreSQL migrations and run the same invariants under production concurrency, role grants and database-level constraints; verify backups by restoring to isolated infrastructure.
 3. Complete verified order/receipt/settlement/bank and product/quantity/cost reconciliation, with durable workers, retries and exception queue recovery. Test WooCommerce read-only connectivity and exact currency mapping.
-4. Validate MFA, authorization, encrypted backups, resource limits and monitoring. Collect accountant sign-off and independent security/operations acceptance.
+4. Validate the configured password-only authentication, session controls, authorization, encrypted backups, resource limits and monitoring. Collect accountant sign-off and independent security/operations acceptance before financial cutover.
 5. Perform safe shadow comparisons and obtain explicit owner cutover approval. Do not enable live writes or disable a legacy integration as part of build or tests.
 
 Rollback: disable new ingestion and recurring workers, preserve all posted documents and audit trails, restore a tested application version against a compatible database, and keep the previous operational system available until acceptance. Never delete posted records to roll back software. No production cutover tooling is included in this evaluation release.

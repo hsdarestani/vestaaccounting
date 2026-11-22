@@ -49,13 +49,7 @@ jobs:
         env:
           ADMIN: ${{ secrets.ADMIN }}
           PASS: ${{ secrets.PASS }}
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
-          SERVER_SSH_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
-          HOST: ${{ secrets.HOST }}
-          WOO_KEY: ${{ secrets.WOO_KEY }}
-          WOO_SECRET: ${{ secrets.WOO_SECRET }}
-          ADMIN_TOTP_SECRET: ${{ secrets.ADMIN_TOTP_SECRET }}
-          TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
         run: |
-          node --input-type=module -e 'import {passwordHash,verifyPassword} from "./runtime/auth.mjs";const configured=!!(process.env.ADMIN&&process.env.PASS);let valid=false;if(configured){try{const h=await passwordHash(process.env.PASS);valid=await verifyPassword(process.env.PASS,h);}catch{}}console.log(JSON.stringify({administrator_configured:configured,administrator_hash_roundtrip:valid,server_host:!!(process.env.SERVER_HOST||process.env.HOST),server_access:!!(process.env.SERVER_SSH_KEY||process.env.SERVER_SSH_PASSWORD),woocommerce_readonly_key_pair:!!(process.env.WOO_KEY&&process.env.WOO_SECRET),mfa_configured:!!process.env.ADMIN_TOTP_SECRET,tunnel_configured:!!process.env.TUNNEL_TOKEN}));'
+          node --input-type=module -e 'import {passwordHash,verifyPassword} from "./runtime/auth.mjs";const configured=!!(process.env.ADMIN&&process.env.PASS);let valid=false;if(configured){try{const h=await passwordHash(process.env.PASS);valid=await verifyPassword(process.env.PASS,h);}catch{}}console.log(JSON.stringify({administrator_configured:configured,administrator_hash_roundtrip:valid,server_host_configured:!!process.env.SERVERIP,server_access_configured:!!process.env.ROOTPASS}));'
