@@ -20,6 +20,7 @@ try {
   const health=await (await page.request.get(url+'/health',{maxRedirects:0})).json();
   assert.equal(health.database,'postgresql');assert.equal(health.mode,'source');
   assert.equal(health.store_writes,false);assert.equal(health.posting_authorized,false);
+  console.log('browser_public_release='+health.version);
   assert.equal(await page.locator('html').getAttribute('dir'),'rtl');
   assert.equal(await page.locator('input[name=otp]').count(),0);
   await page.evaluate(()=>document.fonts.ready);
@@ -40,9 +41,11 @@ try {
   assert.ok(dashboard&&typeof dashboard.complete==='boolean');
   console.log('private_woo_sync_health='+JSON.stringify({
     has_imported_catalog:dashboard.products>0,has_imported_orders:dashboard.orders>0,
+    has_imported_variations:dashboard.variations>0,has_imported_customers:dashboard.customers>0,
+    has_imported_refunds:dashboard.refunds>0,has_imported_categories:dashboard.categories>0,
     completed_first_cycle:!!dashboard.last_success,current_cycle_complete:dashboard.complete,
     has_source_error:!!dashboard.last_error,
-    source_error:/^(woo_http_\d{3}|sync_failed|read_only_credentials_missing)$/.test(dashboard.last_error||'')?dashboard.last_error:null
+    source_error:/^(woo_http_\d{3}|sync_failed|read_only_credentials_missing|catalog_empty|count_changed|source_timeout|pagination_headers_missing|invalid_source_page|invalid_source_identity)$/.test(dashboard.last_error||'')?dashboard.last_error:null
   }));
   phase='dashboard-image';
   // Browser artifacts must remain safe to share: mask every private metric,
@@ -56,6 +59,13 @@ try {
     await page.locator(`#nav [data-view="${view}"]`).click();
     await page.waitForFunction(()=>document.querySelector('#content .panel')||document.querySelector('#content .dashboard-welcome'),null,{timeout:16000});
     assert.equal(await page.locator('#content .error').count(),0,'screen '+view);
+    if(view==='source_orders'&&controls.includes('source_categories')&&dashboard.orders>0){
+      await page.locator('#content button').filter({hasText:'جزئیات'}).first().click();
+      await page.locator('#detail:not([hidden])').waitFor({state:'visible'});
+      await page.locator('#closeDrawer').click();
+      assert.equal(await page.locator('#detail').getAttribute('hidden'),'');
+      console.log('browser_real_order_detail_verified=true');
+    }
   }
   phase='logout';
   await page.locator('#logout').click();
