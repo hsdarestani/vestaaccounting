@@ -26,6 +26,22 @@ const debit=(account,debit,detail='')=>({account,debit,credit:0,detail});
 const credit=(account,credit,detail='')=>({account,debit:0,credit,detail});
 const entry=(side,account,value,detail='')=>value===0?[]:[side(account,value,detail)];
 const audit=(db,actor,action,ref,description='')=>stmt(db,'INSERT INTO audit(at,actor,action,ref,description) VALUES(?,?,?,?,?)',now(),actor,action,ref,description);
+async function scanReconciliation(db,actor){
+  const rows=await db.batch([
+    stmt(db,"SELECT COALESCE(SUM(value),0) n FROM products"),
+    stmt(db,"SELECT COALESCE(SUM(l.debit-l.credit),0) n FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted' AND account='1200'"),
+    stmt(db,"SELECT d.ref,d.gross, d.subtotal-d.discount+d.shipping+d.tax expected FROM documents d WHERE d.kind IN('sale','sale_return') AND d.gross<>d.subtotal-d.discount+d.shipping+d.tax"),
+    stmt(db,"SELECT j.ref,COALESCE(SUM(l.debit-l.credit),0) balance FROM journals j JOIN lines l ON l.journal=j.id WHERE j.status='posted' GROUP BY j.id HAVING SUM(l.debit-l.credit)<>0")]);
+  const stock=rows[0].results[0].n,ledger=rows[1].results[0].n,issues=[];
+  if(stock!==ledger)issues.push({ref:'scan:inventory-ledger',kind:'inventory_ledger',expected:stock,observed:ledger,description:'تفاوت ارزش دفتر انبار و حساب موجودی'});
+  for(const d of rows[2].results)issues.push({ref:'scan:sale:'+d.ref,kind:'sales_total',expected:d.expected,observed:d.gross,description:'مجموع مبلغ سند فروش با اقلام نمی‌خواند'});
+  for(const d of rows[3].results)issues.push({ref:'scan:journal:'+d.ref,kind:'journal_balance',expected:0,observed:Math.abs(d.balance),description:'عدم تراز ثبت قطعی'});
+  const q=issues.map(i=>stmt(db,"INSERT INTO exceptions(id,kind,ref,expected,observed,description,status,at) VALUES(?,?,?,?,?,?,'open',?) ON CONFLICT(ref) DO UPDATE SET expected=excluded.expected,observed=excluded.observed,status='open',resolution=NULL,at=excluded.at",uuid(),i.kind,i.ref,i.expected,i.observed,i.description,now()));
+  // Only the mathematically exact internal inventory check may auto-resolve.
+  // External exceptions and unknown source evidence are never cleared here.
+  if(stock===ledger)q.push(stmt(db,"UPDATE exceptions SET expected=?,observed=?,status='resolved',resolution='تطبیق دقیق ارزش دفتر انبار و حساب موجودی' WHERE ref='scan:inventory-ledger' AND status<>'resolved'",stock,ledger));
+  q.push(audit(db,actor,'reconcile.scan','internal',JSON.stringify({stock,ledger,issues:issues.length})));await db.batch(q);return {issues:issues.length,inventory_equal:stock===ledger};
+}
 function security(headers={}){return {'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Strict-Transport-Security':'max-age=31536000','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",...headers};}
 const json=(value,status=200,headers={})=>Response.json(value,{status,headers:security(headers)});
 function asset(s,type){return new Response(s,{headers:security({'Content-Type':type+'; charset=utf-8'})});}
@@ -42,6 +58,7 @@ function bank(v){check(BANKS.includes(v),'حساب بانکی نامعتبر');r
 function channel(v){check([...BANKS,...GATEWAYS].includes(v),'روش پرداخت نامعتبر');return v;}
 async function operation(db,b,actor){
   const kind=text(b.kind,'نوع عملیات',50);const id=uuid();
+  if(kind==='scan')return await scanReconciliation(db,actor);
   if(kind==='period'){const starts=date(b.starts),ends=date(b.ends);check(starts<=ends,'بازه نامعتبر');await db.batch([stmt(db,'INSERT INTO periods(id,title,starts,ends) VALUES(?,?,?,?)',id,text(b.title,'عنوان'),starts,ends),audit(db,actor,'period.create',id)]);return {id};}
   if(kind==='period_lock'){const key=text(b.id,'دوره'),reason=text(b.reason,'علت');check(b.locked===true||b.locked===false,'وضعیت نامعتبر');await db.batch([stmt(db,'UPDATE periods SET locked=? WHERE id=?',Number(b.locked),key),audit(db,actor,'period.lock',key,reason)]);return {id:key};}
   if(kind==='account'){const code=text(b.code,'کد',12);check(/^\d{4,12}$/.test(code)&&['asset','liability','equity','revenue','expense'].includes(b.account_kind),'حساب نامعتبر');await db.batch([stmt(db,'INSERT INTO accounts VALUES(?,?,?)',code,text(b.title,'عنوان'),b.account_kind),audit(db,actor,'account.create',code)]);return {id:code};}
@@ -93,12 +110,18 @@ async function data(db,module,url){const start=url.searchParams.get('start')||'0
   if(module==='journals')return {rows:await all(db,'SELECT j.*,COALESCE((SELECT SUM(debit) FROM lines WHERE journal=j.id),0) total FROM journals j WHERE j.date BETWEEN ? AND ? ORDER BY j.date DESC,j.at DESC LIMIT 100 OFFSET ?',start,end,page)};
   if(module==='periods')return {rows:await all(db,'SELECT * FROM periods ORDER BY starts')};
   if(module==='customers'||module==='suppliers')return {rows:await all(db,PARTY_SQL,module==='customers'?'customer':'supplier')};
-  if(module==='products'||module==='inventory')return {rows:await all(db,'SELECT p.*,r.quantity reference_quantity,r.evidence FROM products p LEFT JOIN opening_refs r ON r.product=p.id ORDER BY p.id LIMIT 100 OFFSET ?',page)};
+  if(module==='products'||module==='inventory')return {rows:await all(db,'SELECT p.id,p.product_id,p.variation_id,p.name,p.variant,p.sku,p.category,p.quantity,CASE WHEN r.product IS NOT NULL AND p.version=0 THEN NULL ELSE p.value END value,p.version,r.quantity reference_quantity,r.evidence FROM products p LEFT JOIN opening_refs r ON r.product=p.id ORDER BY p.id LIMIT 100 OFFSET ?',page)};
   if(module==='movements')return {rows:await all(db,'SELECT m.*,p.name,p.variant,d.ref FROM movements m JOIN products p ON p.id=m.product JOIN documents d ON d.id=m.doc WHERE m.date BETWEEN ? AND ? ORDER BY m.date DESC LIMIT 100 OFFSET ?',start,end,page)};
   if(module==='reconciliation')return {rows:await all(db,'SELECT * FROM exceptions ORDER BY at DESC LIMIT 100 OFFSET ?',page)};
   if(module==='audit')return {rows:await all(db,'SELECT * FROM audit ORDER BY id DESC LIMIT 100 OFFSET ?',page)};
   if(module==='opening_refs')return {rows:await all(db,'SELECT r.*,p.name,p.variant FROM opening_refs r JOIN products p ON p.id=r.product')};
   if(module==='trial'||module==='reports'||module==='bank'||module==='gateways')return await report(db,start,end);
+  if(module==='balance_sheet')return await report(db,'0001-01-01',end);
+  if(module==='cashflow'){
+    const opening=await first(db,"SELECT COALESCE(SUM(l.debit-l.credit),0) n FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted' AND l.account IN('1010','1011') AND j.date<?",start);
+    const rows=await all(db,"SELECT COALESCE(d.kind,'manual') kind,SUM(l.debit) debit,SUM(l.credit) credit,SUM(l.debit-l.credit) balance FROM lines l JOIN journals j ON j.id=l.journal LEFT JOIN documents d ON d.journal=j.id WHERE j.status='posted' AND l.account IN('1010','1011') AND j.date BETWEEN ? AND ? GROUP BY COALESCE(d.kind,'manual')",start,end);
+    return {rows,opening:opening.n,closing:opening.n+rows.reduce((s,r)=>s+r.balance,0)};
+  }
   if(module==='profitability')return {rows:await all(db,`SELECT p.id,p.name,p.variant,p.category,SUM(CASE WHEN d.kind='sale' THEN d.subtotal-d.discount ELSE -(d.subtotal-d.discount) END) revenue,SUM(CASE WHEN d.kind='sale' THEN d.cost ELSE -d.cost END) cogs,SUM(CASE WHEN d.kind='sale' THEN d.subtotal-d.discount-d.cost ELSE -(d.subtotal-d.discount-d.cost) END) margin FROM documents d JOIN products p ON p.id=d.product WHERE d.kind IN('sale','sale_return') AND d.date BETWEEN ? AND ? GROUP BY p.id ORDER BY margin DESC`,start,end)};
   if(module==='ledger'){const account=text(url.searchParams.get('account'),'حساب',12),detail=url.searchParams.get('detail');return {rows:await all(db,`SELECT l.*,j.ref,j.date,j.description FROM lines l JOIN journals j ON j.id=l.journal WHERE l.account=? AND (? IS NULL OR l.detail=?) AND ${posted} AND j.date BETWEEN ? AND ? ORDER BY j.date,j.at,l.id LIMIT 100 OFFSET ?`,account,detail,detail,start,end,page)};}
   if(module==='settings')return {rows:[{key:'حالت سامانه',value:'DEMO / فقط داده ساختگی'},{key:'ارز',value:'تومان (عدد صحیح)'},{key:'درگاه‌ها',value:'شبیه‌سازی؛ بدون API واقعی'},{key:'WooCommerce',value:'متصل نیست؛ بدون هرگونه نوشتن'},{key:'پایگاه داده',value:'Cloudflare D1؛ محیط مستقل ارزیابی'},{key:'سیاست ارزش‌گذاری',value:'میانگین موزون؛ نیازمند تأیید حسابدار'},{key:'مالیات',value:'مبلغ صریح؛ بدون ادعای انطباق قانونی'}]};
