@@ -22,3 +22,21 @@ jobs:
           node-version: '24'
       - run: node --check edge-demo/worker.mjs && node --check edge-demo/ui.mjs
       - run: node edge-demo/test.mjs
+  postgres-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: synthetic-ci-password
+          POSTGRES_DB: synthetic_accounting
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker exec -i '${{ job.services.postgres.id }}' psql -U postgres -d synthetic_accounting -v ON_ERROR_STOP=1 < postgres/001_ledger.sql
+      - run: docker exec -i '${{ job.services.postgres.id }}' psql -U postgres -d synthetic_accounting -v ON_ERROR_STOP=1 < postgres/acceptance.sql
