@@ -4,23 +4,29 @@ set -Eeuo pipefail
 umask 077
 ROOT=/srv/vesta-accounting
 cd "$ROOT/private"
-test -f installed && test -s .woo.env
+test -f installed && test -s .woo.env || { echo catalog_precheck_no_accounting_credentials; exit 40; }
 exec 9>"$ROOT/.install.lock"
-flock -n 9
+flock -w 30 9 || { echo catalog_precheck_accounting_lock_unavailable; exit 41; }
 store=/srv/vestacutella/runtime/vesta
-docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/www/html"}}{{.Source}}{{end}}{{end}}' vc-vesta | grep -Fxq "$store"
-test -d "$store/wp-content/mu-plugins" && test "$(realpath "$store/wp-content/mu-plugins")" = "$store/wp-content/mu-plugins"
-dest="$store/wp-content/mu-plugins/vesta-accounting-catalog.php"
-docker exec -u www-data -i vc-vesta php -d display_errors=0 -l < vesta-accounting-catalog.php >/dev/null
+actual=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/www/html"}}{{.Source}}{{end}}{{end}}' vc-vesta)
+test -n "$actual" && test "$(realpath -e "$actual")" = "$(realpath -e "$store")" || { echo catalog_precheck_wrong_wordpress_mount; exit 42; }
+plugin_dir=$(realpath -e "$store/wp-content/mu-plugins")
+test -d "$plugin_dir" && [[ "$plugin_dir" == "$(realpath -e "$store")"/wp-content/mu-plugins ]] || { echo catalog_precheck_wrong_plugin_mount; exit 43; }
+dest="$plugin_dir/vesta-accounting-catalog.php"
+docker exec -u www-data -i vc-vesta php -d display_errors=0 -l < vesta-accounting-catalog.php || { echo catalog_precheck_php_lint_failed; exit 44; }
+echo catalog_filesystem_and_php_validation_passed=true
 installed=0
 trap 'status=$?; if [[ "$installed" == 1 ]]; then mv -- "$dest" "$ROOT/private/catalog-adapter-rejected.php"; fi; exit "$status"' ERR
 if [[ -f "$dest" ]]; then
-    cmp -s "$dest" vesta-accounting-catalog.php
+    cmp -s "$dest" vesta-accounting-catalog.php || { echo catalog_precheck_existing_adapter_differs; exit 45; }
 else
-    install -m 644 vesta-accounting-catalog.php "$dest"
+    next=$(mktemp "$plugin_dir/.vesta-accounting-catalog.XXXXXXXX")
+    install -m 644 vesta-accounting-catalog.php "$next"
+    mv -T -- "$next" "$dest"
     installed=1
 fi
 cd "$ROOT/release/runtime"
+echo catalog_secure_connection_preflight_started=true
 docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml -f "$ROOT/private/compose.source-sync.yml" --profile source-sync +  run -T --no-deps --rm sync node --input-type=module <<'NODE'
 const url='https://vesta-cosmetics.ir/wp-json/wc/v3/vesta-accounting/catalog?per_page=1&_fields=id';
 try{
