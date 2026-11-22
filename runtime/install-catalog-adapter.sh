@@ -27,7 +27,7 @@ else
 fi
 cd "$ROOT/release/runtime"
 echo catalog_secure_connection_preflight_started=true
-docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml -f "$ROOT/private/compose.source-sync.yml" --profile source-sync +  run -T --no-deps --rm sync node --input-type=module <<'NODE'
+docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml -f "$ROOT/private/compose.source-sync.yml" --profile source-sync run -T --no-deps --rm sync node --input-type=module <<'NODE'
 const url='https://vesta-cosmetics.ir/wp-json/wc/v3/vesta-accounting/catalog?per_page=1&_fields=id';
 try{
  const get=(headers)=>fetch(url,{method:'GET',headers,redirect:'error',signal:AbortSignal.timeout(20000)});
