@@ -1,4 +1,5 @@
 name: Upgrade Vesta Accounting on the existing host
+# This job never changes the existing demo DNS mapping.
 on:
   push:
     branches: ['product/production-password-auth']
@@ -70,3 +71,4 @@ jobs:
           sshpass -e scp "${args[@]}" runtime/upgrade-host.sh runtime/verify-accounting-login.py "$target:/srv/vesta-accounting/private/"
           sshpass -e scp "${args[@]}" "$RUNNER_TEMP/upgrade-login.json" "$target:/srv/vesta-accounting/private/upgrade-login.json"
           sshpass -e ssh "${args[@]}" "$target" "bash /srv/vesta-accounting/private/upgrade-host.sh '$GITHUB_SHA'"
+          sshpass -e ssh "${args[@]}" "$target" 'set -eu; umask 077; cd /srv/vesta-accounting/private; if test ! -f tunnel-bootstrap.pem && test ! -f cloudflared.token; then openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out tunnel-bootstrap.pem 2>/dev/null; fi; if test -f tunnel-bootstrap.pem; then printf "tunnel_bootstrap_public_key="; openssl pkey -in tunnel-bootstrap.pem -pubout -outform DER | base64 -w0; printf "\n"; fi'
