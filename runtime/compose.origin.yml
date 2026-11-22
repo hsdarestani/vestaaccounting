@@ -1,0 +1,10 @@
+services:
+  proxy:
+    networks:
+      accounting:
+      edge:
+        aliases: [vesta-accounting-proxy-origin]
+networks:
+  edge:
+    external: true
+    name: vestacutella-backend

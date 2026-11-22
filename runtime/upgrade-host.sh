@@ -14,7 +14,11 @@ trap 'rm -f -- "$bootstrap"' EXIT
 test -s "$bootstrap"
 docker image inspect "vesta-accounting:$release" >/dev/null
 cd release/runtime
-compose() { docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml "$@"; }
+compose() {
+  local extra=()
+  if [[ -f "$ROOT/private/compose.origin.active.yml" ]]; then extra=(-f "$ROOT/private/compose.origin.active.yml"); fi
+  docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml "${extra[@]}" "$@"
+}
 docker_root=$(docker info --format '{{.DockerRootDir}}')
 for filesystem in "$ROOT" "$docker_root"; do
   (( $(df -Pm "$filesystem" | awk 'NR==2{print $4}') >= 11264 ))

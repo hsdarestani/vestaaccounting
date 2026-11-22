@@ -1,0 +1,51 @@
+name: Install Vesta Accounting strict HTTPS origin
+on:
+  push:
+    branches: ['product/production-password-auth']
+    paths: ['.github/workflows/install-accounting-origin.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vesta-accounting-host
+  cancel-in-progress: false
+jobs:
+  origin:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/production-password-auth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and install the dedicated HTTPS vhosts over verified SSH
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          bash -n runtime/install-accounting-origin.sh
+          curl -fsS --proto '=https' --max-time 20 https://www.cloudflare.com/ips-v4 -o "$RUNNER_TEMP/ips4"
+          curl -fsS --proto '=https' --max-time 20 https://www.cloudflare.com/ips-v6 -o "$RUNNER_TEMP/ips6"
+          curl -fsS --proto '=https' --max-time 20 https://developers.cloudflare.com/ssl/static/origin_ca_rsa_root.pem -o "$RUNNER_TEMP/origin-ca.pem"
+          openssl verify -CAfile "$RUNNER_TEMP/origin-ca.pem" runtime/accounting-origin-public.pem
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import ipaddress,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          out=[]
+          for version in (4,6):
+              net=[ipaddress.ip_network(x) for x in (root/f'ips{version}').read_text().splitlines()]
+              assert 3<=len(net)<=50 and all(n.version==version and n.prefixlen>=12 and n.is_global for n in net)
+              out.extend(f'allow {n};' for n in net)
+          (root/'edge-acl.conf').write_text('\n'.join(out+['deny all;'])+'\n')
+          PY
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          actual=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$actual" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          target="root@$SERVERIP"
+          sshpass -e scp "${args[@]}" "$RUNNER_TEMP/origin-ca.pem" "$RUNNER_TEMP/edge-acl.conf" "$target:/srv/vesta-accounting/private/origin-tls/"
+          sshpass -e scp "${args[@]}" runtime/accounting-origin-public.pem "$target:/srv/vesta-accounting/private/origin-tls/origin.pem"
+          sshpass -e scp "${args[@]}" runtime/{install-accounting-origin.sh,accounting-origin.nginx,compose.origin.yml} "$target:/srv/vesta-accounting/private/"
+          sshpass -e ssh "${args[@]}" "$target" 'bash /srv/vesta-accounting/private/install-accounting-origin.sh'
