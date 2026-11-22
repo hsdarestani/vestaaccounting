@@ -8,7 +8,8 @@ import {sourceService,acceptWebhook} from './source.mjs';
 const pool=poolFromEnv(),db=new PgBinding(pool),origin=new URL(process.env.APP_ORIGIN||'https://hesab.vesta-cosmetics.ir').origin;
 const mfa=process.env.MFA_REQUIRED!=='0';if(mfa&&!process.env.ADMIN_TOTP_SECRET)throw Error('MFA secret must be provisioned privately');if(!process.env.IP_SALT||process.env.IP_SALT.length<32)throw Error('IP salt required');
 const fontPath=process.env.IRANYEKAN_FONT_PATH;const fontAvailable=!!fontPath&&await stat(fontPath).then(x=>x.isFile()&&x.size>1000&&x.size<8*1024*1024).catch(()=>false);
-const env={DB:db,MODE:'source',IP_SALT:process.env.IP_SALT,RELEASE:process.env.RELEASE||'local',FONT_AVAILABLE:fontAvailable,MFA_REQUIRED:mfa,authenticate:authenticator(pool,{requireMfa:mfa,totpSecret:process.env.ADMIN_TOTP_SECRET}),integration:sourceService(pool)};
+const vazirFont=await readFile(new URL('../edge-demo/fonts/Vazirmatn.woff2',import.meta.url));
+const env={DB:db,MODE:'source',IP_SALT:process.env.IP_SALT,RELEASE:process.env.RELEASE||'local',FONT_AVAILABLE:fontAvailable,VAZIR_FONT:vazirFont,MFA_REQUIRED:mfa,authenticate:authenticator(pool,{requireMfa:mfa,totpSecret:process.env.ADMIN_TOTP_SECRET}),integration:sourceService(pool)};
 const server=createServer(async(req,res)=>{try{
  const url=new URL(req.url,origin);if(url.origin!==origin){res.writeHead(400);res.end();return;}
  if(url.pathname==='/fonts/iranyekan.woff2'&&req.method==='GET'){if(!fontAvailable){res.writeHead(404);res.end();return;}res.writeHead(200,{'Content-Type':'font/woff2','Cache-Control':'private,max-age=86400','X-Content-Type-Options':'nosniff'});res.end(await readFile(fontPath));return;}
