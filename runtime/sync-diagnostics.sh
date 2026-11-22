@@ -15,4 +15,17 @@ for(const [name,kind,opts] of [['catalog','products',{}],['catalog_date_bound','
   try{const result=await source.page(kind,1,opts);console.log('source_probe='+name+':'+(result.rows.length?'response_has_records':'response_empty'));}
   catch(e){console.log('source_probe='+name+':'+safe(e));}
 }
+for(const [label,query] of [
+  ['catalog_default',''],['catalog_published','status=publish'],
+  ['catalog_any','status=any'],['catalog_sort_desc','orderby=id&order=desc'],
+  ['catalog_variable','type=variable'],['catalog_public','public']
+]){
+  const path=query==='public'?'/wp-json/wc/store/v1/products':'/wp-json/wc/v3/products';
+  const url=new URL(path,source.origin);url.search='per_page=1&_fields=id'+(query&&query!=='public'?'&'+query:'');
+  try{
+    const r=await fetch(url,{method:'GET',headers:{Accept:'application/json',...(query==='public'?{}:{Authorization:source.auth})},redirect:'error',signal:AbortSignal.timeout(18000)});
+    const marker=!r.ok?'woo_http_'+r.status:(Array.isArray(await r.clone().json())&&(await r.json()).length?'response_has_records':'response_empty');
+    console.log('source_probe='+label+':'+marker);
+  }catch(e){console.log('source_probe='+label+':'+safe(e));}
+}
 NODE
