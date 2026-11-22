@@ -3,7 +3,7 @@ name: Upgrade Vesta Accounting on the existing host
 on:
   push:
     branches: ['product/production-password-auth']
-    paths: ['.github/workflows/upgrade-accounting.yml']
+    paths: ['.github/workflows/upgrade-accounting.yml', 'runtime/upgrade-host.sh', 'runtime/sync.mjs']
   workflow_dispatch:
 permissions:
   contents: read

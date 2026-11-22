@@ -17,6 +17,9 @@ cd release/runtime
 compose() {
   local extra=()
   if [[ -f "$ROOT/private/compose.origin.active.yml" ]]; then extra=(-f "$ROOT/private/compose.origin.active.yml"); fi
+  if [[ -s "$ROOT/private/.woo.env" && -f "$ROOT/private/compose.source-sync.yml" ]]; then
+    extra+=(-f "$ROOT/private/compose.source-sync.yml" --profile source-sync)
+  fi
   docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml "${extra[@]}" "$@"
 }
 docker_root=$(docker info --format '{{.DockerRootDir}}')
@@ -32,7 +35,8 @@ rollback() {
   cp -- "$snapshot/.compose.env" "$ROOT/private/.compose.env"
   cp -- "$snapshot/.private.env" "$ROOT/private/.private.env"
   compose up -d --no-deps --pull never --wait app >/dev/null &&
-  compose up -d --no-deps --pull never --wait --force-recreate proxy >/dev/null
+  compose up -d --no-deps --pull never --wait --force-recreate proxy >/dev/null &&
+  if [[ -s "$ROOT/private/.woo.env" ]]; then compose up -d --no-deps --pull never sync >/dev/null; fi
 }
 trap 'code=$?; trap - ERR; rollback || echo accounting_rollback_needs_inspection; exit "$code"' ERR
 python3 - "$ROOT/private" "$release" <<'PY'
@@ -54,5 +58,6 @@ PY
 compose up -d --no-deps --pull never --wait app
 compose up -d --no-deps --pull never --wait --force-recreate proxy
 python3 "$ROOT/private/verify-accounting-login.py" http://127.0.0.1:18089 "$bootstrap" "$release"
+if [[ -s "$ROOT/private/.woo.env" ]]; then compose up -d --no-deps --pull never --wait sync; fi
 trap - ERR
 echo accounting_upgrade_verified=true
