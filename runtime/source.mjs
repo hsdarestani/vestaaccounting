@@ -27,7 +27,7 @@ export class WooSource{
   u.searchParams.set('page',String(page));u.searchParams.set('per_page',String(this.pageSize));u.searchParams.set('_fields',fields[kind]);
   if(catalog&&parent)u.searchParams.set('parent',parent);
   if(kind==='products'||kind==='orders'){u.searchParams.set('orderby','id');u.searchParams.set('order','asc');if(after)u.searchParams.set('modified_after',after);if(before)u.searchParams.set(after?'modified_before':'before',before);u.searchParams.set('dates_are_gmt','true');}
-  if(kind==='customers'){u.searchParams.set('orderby','id');u.searchParams.set('order','asc');}
+  if(['customers','categories','coupons'].includes(kind)){u.searchParams.set('orderby','id');u.searchParams.set('order','asc');}
   const r=await this.fetcher(u,{method:'GET',headers:{Authorization:this.auth,Accept:'application/json','User-Agent':'VestaAccounting-readonly/0.5'},redirect:'error',signal:AbortSignal.timeout(20000)});
   if(!r.ok)throw Error('woo_http_'+r.status);
   const rows=await r.json();if(!Array.isArray(rows)||rows.length>this.pageSize)throw Error('invalid woo page');
