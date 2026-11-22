@@ -1,0 +1,32 @@
+name: Verify accounting host readiness after stopped install
+on:
+  push:
+    branches: ["audit/isolated-host-gate-20261122"]
+    paths: [".github/workflows/host-gate-audit.yml"]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check resource gates with no private data or secrets in logs
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          umask 077
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          test "$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o ConnectTimeout=15 "root@$SERVERIP" 'bash -s' <<'REMOTE'
+          set -eu
+          ram=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)
+          disk=$(df -Pm /srv/vesta-accounting | awk 'NR==2{print $4}')
+          if [ "$ram" -ge 3000 ]; then echo memory_gate=pass; else echo memory_gate=fail; fi
+          if [ "$disk" -ge 15000 ]; then echo disk_gate=pass; else echo disk_gate=fail; fi
+          if docker ps -aq --filter label=com.docker.compose.project=vesta-accounting-source | grep -q .; then echo accounting_containers_exist=yes; else echo accounting_containers_exist=no; fi
+          if test -f /srv/vesta-accounting/private/installed; then echo installation_marker=present; else echo installation_marker=absent; fi
+          REMOTE
