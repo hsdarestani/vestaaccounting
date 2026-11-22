@@ -59,7 +59,9 @@ jobs:
       - name: Build immutable release on CI, not the storefront host
         run: |
           docker build -f runtime/Dockerfile -t "vesta-accounting:$RELEASE" .
-          docker save "vesta-accounting:$RELEASE" | gzip -1 > "$RUNNER_TEMP/image.tar.gz"
+          docker pull postgres:16-alpine
+          docker pull nginx:1.27-alpine
+          docker save "vesta-accounting:$RELEASE" postgres:16-alpine nginx:1.27-alpine | gzip -1 > "$RUNNER_TEMP/image.tar.gz"
           tar -czf "$RUNNER_TEMP/release.tar.gz" runtime edge-demo
       - name: Transfer privately over verified SSH and install isolated service
         env:

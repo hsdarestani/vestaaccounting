@@ -14,6 +14,8 @@ if (( available < 3000 || disk < 15000 )); then echo 'Capacity gate failed: memo
 awk -v l="$load" -v c="$cores" 'BEGIN{exit !(l<c*0.8)}' || { echo 'Capacity gate failed: CPU load'; exit 42; }
 vmstat 1 3 | tail -1 | awk '{exit !($7==0&&$8==0)}' || { echo 'Capacity gate failed: active swap I/O';exit 43; }
 mkdir -p release private backups
+test ! -e "$ROOT/private/installed" || { echo 'Existing healthy installation; reviewed upgrade required'; exit 44; }
+if docker ps -aq --filter label=com.docker.compose.project=vesta-accounting-source | grep -q .; then echo 'Partial container installation exists; inspect before retry'; exit 45; fi
 tar -xzf release.tar.gz -C release
 gzip -dc image.tar.gz | docker load >/dev/null
 cd release/runtime
@@ -30,18 +32,23 @@ if not env.exists():
     mfa='1' if d.get('ADMIN_TOTP_SECRET') else '0'
     env.write_text('\n'.join([f'DATABASE_URL=postgresql://accounting:{pw}@postgres:5432/vesta_accounting',f'IP_SALT={secrets.token_hex(32)}',f'MFA_REQUIRED={mfa}',f'ADMIN_TOTP_SECRET={d.get("ADMIN_TOTP_SECRET","")}','WOO_ORIGIN=https://vesta-cosmetics.ir/',f'WOO_KEY={d.get("WOO_KEY","")}',f'WOO_SECRET={d.get("WOO_SECRET","")}',f'WOO_WEBHOOK_SECRET={d.get("WOO_WEBHOOK_SECRET","")}',f'RELEASE={d["RELEASE"]}'])+'\n');db.write_text(f'POSTGRES_PASSWORD={pw}\nACCOUNTING_IMAGE=vesta-accounting:{d["RELEASE"]}\n')
 else:
-    if f'ACCOUNTING_IMAGE=vesta-accounting:{d["RELEASE"]}\n' not in db.read_text(): raise SystemExit('Different existing release; use reviewed incremental deployment')
+    # Resume only an unstarted installation, guarded above by project-container absence.
+    # Preserve existing DB password and IP salt; no credentials are replaced.
+    old=db.read_text()
+    if not re.search(r'^ACCOUNTING_IMAGE=vesta-accounting:[0-9a-f]{40}$',old,re.M): raise SystemExit('Unexpected previous configuration')
+    db.write_text(re.sub(r'^ACCOUNTING_IMAGE=vesta-accounting:[0-9a-f]{40}$',f'ACCOUNTING_IMAGE=vesta-accounting:{d["RELEASE"]}',old,flags=re.M))
+    env.write_text(re.sub(r'^RELEASE=[0-9a-f]{40}$',f'RELEASE={d["RELEASE"]}',env.read_text(),flags=re.M))
 for f in (env,db): os.chmod(f,0o600)
 PY
 if [[ ! -e .private.env ]];then ln -s "$ROOT/private/.private.env" .private.env;fi
-docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml up -d --wait postgres
+docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml up -d --wait --pull never postgres
 docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml run --rm app node migrate.mjs
 python3 - "$ROOT/bootstrap.json" "$ROOT/private/.compose.env" <<'PY'
 import json, os, subprocess, sys
 d=json.load(open(sys.argv[1]));e=dict(os.environ,ADMIN=d['ADMIN'],PASS=d['PASS'])
 subprocess.run(['docker','compose','--env-file',sys.argv[2],'-f','compose.yml','run','--rm','-e','ADMIN','-e','PASS','app','node','provision.mjs'],env=e,check=True)
 PY
-docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml up -d --wait app proxy
+docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml up -d --wait --pull never app proxy
 curl -fsS --max-time 10 http://127.0.0.1:18089/health | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["database"]=="postgresql" and d["posting_authorized"] is False;print("Isolated PostgreSQL runtime is healthy")'
 python3 - "$ROOT/bootstrap.json" <<'PY'
 import json,sys,urllib.request
@@ -59,4 +66,5 @@ else:
 PY
 # Explicit source synchronization is authorized, but only start after separate release gate.
 rm -f "$ROOT/release.tar.gz" "$ROOT/image.tar.gz"
+touch "$ROOT/private/installed"
 echo 'Private installation healthy; no public routing or source import enabled. MFA is required before public route.'
