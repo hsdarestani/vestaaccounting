@@ -28,10 +28,12 @@ try{
  const source=new WooSource({origin:'https://example.invalid/',key:'synthetic-key',secret:'synthetic-secret',fetcher:mock,pageSize:5});for(let i=0;i<12;i++){const result=await runCycle(pool,source,{budget:2,delay:0});assert.equal(result.failed,undefined);if(result.remaining===0)break;}const summary=await env.integration.summary();assert.ok(summary.complete);assert.equal(summary.orders,1);assert.equal(summary.variations,1);assert.equal(summary.refunds,1);assert.equal(summary.pending,1);
  // A first-run category import with duplicate IDs must be automatically re-scanned.
  await pool.query("UPDATE sync_control SET last_success=NULL WHERE id=1");
- await pool.query("UPDATE sync_state SET expected_count=2 WHERE kind='categories'");
+ await pool.query("UPDATE sync_state SET expected_count=2 WHERE kind IN ('categories','customers')");
  await runCycle(pool,source,{budget:9,delay:0});
  assert.equal((await pool.query("SELECT status FROM sync_state WHERE kind='categories'")).rows[0].status,'complete');
  assert.equal((await pool.query("SELECT COUNT(*) n FROM raw_current WHERE kind='categories'")).rows[0].n,1);
+ assert.equal((await pool.query("SELECT status FROM sync_state WHERE kind='customers'")).rows[0].status,'complete');
+ assert.equal((await pool.query("SELECT expected_count FROM sync_state WHERE kind='customers'")).rows[0].expected_count,1);
  env.MODE='source';const [sourceDashboard]=await request('/api/dashboard');assert.equal(sourceDashboard.posting_authorized,false);assert.equal(sourceDashboard.integration.orders,1);await request('/api/data/source_orders');const [orderDetail]=await request('/api/source-detail?kind=orders&id=21');assert.equal(orderDetail.record.total,'1230');const [refundDetail]=await request('/api/source-detail?kind=refunds&id=31&parent=21');assert.equal(refundDetail.record.currency,'IRR');await request('/api/source-detail?kind=customers&id=8','GET',null,404);await request('/api/operate','POST',{kind:'sale',ref:'SHOULD-NOT-POST'},403);await request('/api/logout','POST',{});await request('/api/dashboard','GET',null,401);
  assert.equal((await pool.query("SELECT COALESCE(SUM(debit-credit),0) n FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted'")).rows[0].n,0);
  console.log('PostgreSQL runtime acceptance complete:',checks,'HTTP assertions; immutable revisions, signed webhook replay, bounded sync and posting guard passed');
