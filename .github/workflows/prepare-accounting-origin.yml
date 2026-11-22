@@ -1,0 +1,43 @@
+name: Prepare the Vesta Accounting origin certificate request
+on:
+  push:
+    branches: ['product/production-password-auth']
+    paths: ['.github/workflows/prepare-accounting-origin.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  csr:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/production-password-auth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Generate the origin key on the server and return only the public CSR
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          actual=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$actual" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          sshpass -e ssh "${args[@]}" "root@$SERVERIP" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          cd /srv/vesta-accounting/private
+          test -f installed
+          docker inspect --format '{{.State.Running}}' vc-nginx | grep -Fxq true
+          mkdir -p origin-tls
+          cd origin-tls
+          if [[ ! -s origin.csr ]]; then
+            test ! -e origin.key
+            openssl req -new -newkey rsa:2048 -nodes -subj '/CN=hesab.vesta-cosmetics.ir' -addext 'subjectAltName=DNS:hesab.vesta-cosmetics.ir,DNS:hesab-stage.vesta-cosmetics.ir' -keyout origin.key -out origin.csr 2>/dev/null
+          fi
+          printf "accounting_origin_public_csr="
+          base64 -w0 < origin.csr
+          printf "\n"
+          REMOTE

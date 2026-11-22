@@ -84,7 +84,6 @@ jobs:
           WOO_KEY: ${{ secrets.WOO_KEY }}
           WOO_SECRET: ${{ secrets.WOO_SECRET }}
           WOO_WEBHOOK_SECRET: ${{ secrets.WOO_WEBHOOK_SECRET }}
-          ADMIN_TOTP_SECRET: ${{ secrets.ADMIN_TOTP_SECRET }}
         run: |
           set -euo pipefail
           umask 077
@@ -95,7 +94,7 @@ jobs:
           export SSHPASS="$ROOTPASS"
           python3 - <<'PY'
           import json,os,pathlib
-          keys=['ADMIN','PASS','WOO_KEY','WOO_SECRET','WOO_WEBHOOK_SECRET','ADMIN_TOTP_SECRET','RELEASE']
+          keys=['ADMIN','PASS','WOO_KEY','WOO_SECRET','WOO_WEBHOOK_SECRET','RELEASE']
           (pathlib.Path(os.environ['RUNNER_TEMP'])/'bootstrap.json').write_text(json.dumps({k:os.environ[k] for k in keys}))
           PY
           args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)

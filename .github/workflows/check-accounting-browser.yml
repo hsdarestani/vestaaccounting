@@ -1,0 +1,40 @@
+name: Verify the public Vesta Accounting browser experience
+on:
+  push:
+    branches: ['product/production-password-auth']
+    paths: ['.github/workflows/check-accounting-browser.yml', 'runtime/browser-smoke.mjs']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/production-password-auth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - name: Install Chromium browser test runner
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser" --ignore-scripts playwright@1.62.1
+          test -x /usr/bin/google-chrome
+      - name: Verify public HTTPS, real owner login and all views
+        env:
+          ADMIN: ${{ secrets.ADMIN }}
+          PASS: ${{ secrets.PASS }}
+          CHROME_PATH: /usr/bin/google-chrome
+          EXPECT_PRIVATE_SYNC_TOTALS: '1'
+        run: |
+          set -euo pipefail
+          BROWSER_OUTPUT="$RUNNER_TEMP/vesta-screenshots" PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright" node runtime/browser-smoke.mjs
+      - name: Publish login and redacted dashboard screenshots only
+        uses: actions/upload-artifact@v4
+        with:
+          name: vesta-accounting-browser-screenshots
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/vesta-screenshots/vesta-login-desktop.png
+            ${{ runner.temp }}/vesta-screenshots/vesta-login-mobile.png
+            ${{ runner.temp }}/vesta-screenshots/vesta-dashboard-redacted.png

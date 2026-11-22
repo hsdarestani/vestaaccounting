@@ -1,0 +1,29 @@
+name: Check Vesta Accounting sync worker state
+on:
+  push:
+    branches: ['product/production-password-auth']
+    paths: ['.github/workflows/check-accounting-sync.yml', 'runtime/sync-diagnostics.sh']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sync-status:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/production-password-auth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read only allowlisted worker states and error classes
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          actual=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$actual" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          sshpass -e ssh "${args[@]}" "root@$SERVERIP" 'bash -s' < runtime/sync-diagnostics.sh

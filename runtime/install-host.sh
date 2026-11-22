@@ -38,15 +38,14 @@ cd release/runtime
 python3 - "$ROOT/bootstrap.json" "$ROOT" <<'PY'
 import json, pathlib, re, secrets, sys, os
 p=pathlib.Path(sys.argv[1]); root=pathlib.Path(sys.argv[2]); d=json.loads(p.read_text())
-for k in ('WOO_KEY','WOO_SECRET','ADMIN_TOTP_SECRET','WOO_WEBHOOK_SECRET'):
+for k in ('WOO_KEY','WOO_SECRET','WOO_WEBHOOK_SECRET'):
     if d.get(k) and not re.fullmatch(r'[A-Za-z0-9_\-=]{16,256}',d[k]): raise SystemExit('Invalid private integration configuration')
 if not re.fullmatch(r'[0-9a-f]{40}',d.get('RELEASE','')): raise SystemExit('Invalid release identity')
 env=root/'private'/'.private.env'; db=root/'private'/'.compose.env'
 if env.exists()!=db.exists(): raise SystemExit('Existing private storage incomplete; no changes')
 if not env.exists():
     pw=secrets.token_hex(32)
-    mfa='1' if d.get('ADMIN_TOTP_SECRET') else '0'
-    env.write_text('\n'.join([f'DATABASE_URL=postgresql://accounting:{pw}@postgres:5432/vesta_accounting',f'IP_SALT={secrets.token_hex(32)}',f'MFA_REQUIRED={mfa}',f'ADMIN_TOTP_SECRET={d.get("ADMIN_TOTP_SECRET","")}','WOO_ORIGIN=https://vesta-cosmetics.ir/',f'WOO_KEY={d.get("WOO_KEY","")}',f'WOO_SECRET={d.get("WOO_SECRET","")}',f'WOO_WEBHOOK_SECRET={d.get("WOO_WEBHOOK_SECRET","")}',f'RELEASE={d["RELEASE"]}'])+'\n');db.write_text(f'POSTGRES_PASSWORD={pw}\nACCOUNTING_IMAGE=vesta-accounting:{d["RELEASE"]}\n')
+    env.write_text('\n'.join([f'DATABASE_URL=postgresql://accounting:{pw}@postgres:5432/vesta_accounting',f'IP_SALT={secrets.token_hex(32)}','MFA_REQUIRED=0','WOO_ORIGIN=https://vesta-cosmetics.ir/',f'WOO_KEY={d.get("WOO_KEY","")}',f'WOO_SECRET={d.get("WOO_SECRET","")}',f'WOO_WEBHOOK_SECRET={d.get("WOO_WEBHOOK_SECRET","")}',f'RELEASE={d["RELEASE"]}'])+'\n');db.write_text(f'POSTGRES_PASSWORD={pw}\nACCOUNTING_IMAGE=vesta-accounting:{d["RELEASE"]}\n')
 else:
     # Resume only an unstarted installation, guarded above by project-container absence.
     # Preserve existing DB password and IP salt; no credentials are replaced.
@@ -73,18 +72,15 @@ curl -fsS --max-time 10 http://127.0.0.1:18089/health | python3 -c 'import json,
 python3 - "$ROOT/bootstrap.json" <<'PY'
 import json,sys,urllib.request
 d=json.load(open(sys.argv[1]))
-if not d.get('ADMIN_TOTP_SECRET'):
-    body=json.dumps({'username':d['ADMIN'],'password':d['PASS']}).encode()
-    req=urllib.request.Request('http://127.0.0.1:18089/api/login',data=body,headers={'Content-Type':'application/json'},method='POST')
-    with urllib.request.urlopen(req,timeout=15) as r:
-        user=json.load(r); assert user['role']=='owner' and user['username']==d['ADMIN']; cookie=r.headers['Set-Cookie'].split(';')[0]
-    logout=urllib.request.Request('http://127.0.0.1:18089/api/logout',data=b'{}',headers={'Content-Type':'application/json','Cookie':cookie,'X-CSRF-Token':user['csrf']},method='POST')
-    with urllib.request.urlopen(logout,timeout=15) as r: assert r.status==200
-    print('private_admin_login_verified=true')
-else:
-    print('MFA configured; interactive owner verification required')
+body=json.dumps({'username':d['ADMIN'],'password':d['PASS']}).encode()
+req=urllib.request.Request('http://127.0.0.1:18089/api/login',data=body,headers={'Content-Type':'application/json'},method='POST')
+with urllib.request.urlopen(req,timeout=15) as r:
+    user=json.load(r); assert user['role']=='owner' and user['username']==d['ADMIN']; cookie=r.headers['Set-Cookie'].split(';')[0]
+logout=urllib.request.Request('http://127.0.0.1:18089/api/logout',data=b'{}',headers={'Content-Type':'application/json','Cookie':cookie,'X-CSRF-Token':user['csrf']},method='POST')
+with urllib.request.urlopen(logout,timeout=15) as r: assert r.status==200
+print('private_admin_login_verified=true')
 PY
 # Explicit source synchronization is authorized, but only start after separate release gate.
 rm -f "$ROOT/release.tar.gz"
 touch "$ROOT/private/installed"
-echo 'Private installation healthy; no public routing or source import enabled. MFA is required before public route.'
+echo 'Private installation healthy; no public routing or source import enabled.'
