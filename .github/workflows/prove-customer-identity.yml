@@ -30,4 +30,4 @@ jobs:
           fingerprint=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
           test "$fingerprint" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
           export SSHPASS="$ROOTPASS"
-          sshpass -e ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=yes             -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known"             -o PreferredAuthentications=password -o PubkeyAuthentication=no             "root@$SERVERIP" 'bash -s' < runtime/customer-identity-proof.sh
+          sshpass -e ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=yes             -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known"             -o PreferredAuthentications=password -o PubkeyAuthentication=no             "root@$SERVERIP" 'cd /srv/vesta-accounting/release/runtime && docker compose --env-file /srv/vesta-accounting/private/.compose.env -f compose.yml -f /srv/vesta-accounting/private/compose.source-sync.yml --profile source-sync exec -T sync node --input-type=module' < runtime/customer-identity-proof.mjs
