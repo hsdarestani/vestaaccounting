@@ -1,0 +1,36 @@
+name: Enable Vesta Accounting read-only source sync
+on:
+  push:
+    branches: ['product/production-password-auth']
+    paths: ['.github/workflows/enable-accounting-source.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vesta-accounting-host
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/production-password-auth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n runtime/enable-source-sync.sh
+      - name: Provision the dedicated read-only key on the host and start the accounting worker
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          actual=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$actual" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          target="root@$SERVERIP"
+          sshpass -e scp "${args[@]}" runtime/{enable-source-sync.sh,provision-woo-readonly.php,compose.source-sync.yml} "$target:/srv/vesta-accounting/private/"
+          sshpass -e ssh "${args[@]}" "$target" 'bash /srv/vesta-accounting/private/enable-source-sync.sh'
+        # Never upload keys, real WooCommerce payloads, counts or live database backups as CI artifacts.

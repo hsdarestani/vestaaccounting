@@ -1,0 +1,4 @@
+services:
+  sync:
+    env_file:
+      - /srv/vesta-accounting/private/.woo.env
