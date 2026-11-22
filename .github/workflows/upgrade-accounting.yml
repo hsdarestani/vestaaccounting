@@ -2,8 +2,8 @@ name: Upgrade Vesta Accounting on the existing host
 # This job never changes the existing demo DNS mapping.
 on:
   push:
-    branches: ['product/production-password-auth']
-    paths: ['.github/workflows/upgrade-accounting.yml', 'runtime/upgrade-host.sh', 'runtime/sync.mjs', 'runtime/vesta-accounting-catalog.php', 'runtime/install-catalog-adapter.sh']
+    branches: [main]
+    paths: ['.github/workflows/upgrade-accounting.yml', 'runtime/upgrade-host.sh', 'runtime/sync.mjs', 'runtime/source.mjs', 'runtime/acceptance.mjs', 'runtime/vesta-accounting-catalog.php', 'runtime/install-catalog-adapter.sh']
   workflow_dispatch:
 permissions:
   contents: read
