@@ -6,11 +6,25 @@ ROOT=/srv/vesta-accounting
 cd "$ROOT"
 test -s release.tar.gz && test -s bootstrap.json
 trap 'rm -f "$ROOT/bootstrap.json"' EXIT
+exec 9>"$ROOT/.install.lock"
+flock -n 9 || { echo 'Another accounting installation is running';exit 46; }
+disk_floor=15000
+if [[ "${1:-}" == '--preloaded-private-only' ]]; then
+    # This path never pulls or unpacks images, publishes a port, or imports
+    # source data. Reserve 1 GiB for PostgreSQL initialization and 11 GiB
+    # for the existing host workloads. Check both backing filesystems.
+    disk_floor=12288
+fi
 available=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)
 disk=$(df -Pm "$ROOT" | awk 'NR==2{print $4}')
+docker_root=$(docker info --format '{{.DockerRootDir}}')
+test -d "$docker_root"
+docker_disk=$(df -Pm "$docker_root" | awk 'NR==2{print $4}')
 cores=$(nproc)
 load=$(awk '{print $1}' /proc/loadavg)
-if (( available < 3000 || disk < 15000 )); then echo 'Capacity gate failed: memory or disk';exit 41;fi
+if (( available < 3000 )); then echo 'Capacity gate failed: memory';exit 41;fi
+if (( disk < disk_floor || docker_disk < disk_floor )); then echo 'Capacity gate failed: filesystem reserve';exit 41;fi
+echo 'Private installation capacity gate passed'
 awk -v l="$load" -v c="$cores" 'BEGIN{exit !(l<c*0.8)}' || { echo 'Capacity gate failed: CPU load'; exit 42; }
 vmstat 1 3 | tail -1 | awk '{exit !($7==0&&$8==0)}' || { echo 'Capacity gate failed: active swap I/O';exit 43; }
 mkdir -p release private backups
@@ -51,6 +65,10 @@ d=json.load(open(sys.argv[1]));e=dict(os.environ,ADMIN=d['ADMIN'],PASS=d['PASS']
 subprocess.run(['docker','compose','--env-file',sys.argv[2],'-f','compose.yml','run','--rm','-e','ADMIN','-e','PASS','app','node','provision.mjs'],env=e,check=True)
 PY
 docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml up -d --wait --pull never app proxy
+if [[ "${1:-}" == '--preloaded-private-only' ]] && (( $(df -Pm "$docker_root" | awk 'NR==2{print $4}') < 11264 )); then
+    docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml stop proxy app postgres
+    echo 'Retained filesystem reserve below minimum; accounting services stopped without removing data'; exit 47
+fi
 curl -fsS --max-time 10 http://127.0.0.1:18089/health | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["database"]=="postgresql" and d["posting_authorized"] is False;print("Isolated PostgreSQL runtime is healthy")'
 python3 - "$ROOT/bootstrap.json" <<'PY'
 import json,sys,urllib.request

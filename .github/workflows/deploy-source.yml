@@ -1,7 +1,7 @@
 name: Deploy isolated PostgreSQL source runtime (guarded)
 on:
   push:
-    branches: ['product/host-install-stream']
+    branches: ['product/preloaded-private-install']
     paths: ['.github/workflows/deploy-source.yml']
   workflow_dispatch:
 permissions:
@@ -33,13 +33,21 @@ jobs:
       - run: bash -n runtime/install-host.sh
   deploy:
     needs: verify
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/host-install-stream'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/preloaded-private-install'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       RELEASE: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
+      - name: Select the exact release previously loaded on the host
+        if: github.ref == 'refs/heads/product/preloaded-private-install'
+        run: |
+          set -euo pipefail
+          image_release=2542be0f0738d7efeffd70ecb8fda99748c77c05
+          git fetch --depth=1 origin "$image_release"
+          git diff --exit-code "$image_release" HEAD -- edge-demo runtime ':!runtime/install-host.sh'
+          printf 'RELEASE=%s\nREUSE_PRELOADED=1\n' "$image_release" >> "$GITHUB_ENV"
       - name: Fail closed before any connection if a required secret is missing
         env:
           ADMIN: ${{ secrets.ADMIN }}
@@ -57,12 +65,16 @@ jobs:
           except ValueError: sys.exit('Invalid server IP configuration')
           PY
       - name: Build immutable release on CI, not the storefront host
+        if: github.ref != 'refs/heads/product/preloaded-private-install'
         run: |
           docker build -f runtime/Dockerfile -t "vesta-accounting:$RELEASE" .
           docker pull postgres:16-alpine
           docker pull nginx:1.27-alpine
           docker save "vesta-accounting:$RELEASE" postgres:16-alpine nginx:1.27-alpine | gzip -1 > "$RUNNER_TEMP/image.tar.gz"
           tar -czf "$RUNNER_TEMP/release.tar.gz" runtime edge-demo
+      - name: Package installer and verify the reused runtime content
+        if: github.ref == 'refs/heads/product/preloaded-private-install'
+        run: tar -czf "$RUNNER_TEMP/release.tar.gz" runtime edge-demo
       - name: Transfer privately over verified SSH and install isolated service
         env:
           ADMIN: ${{ secrets.ADMIN }}
@@ -88,6 +100,12 @@ jobs:
           PY
           args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
           target="root@$SERVERIP"
+          if [[ "${REUSE_PRELOADED:-0}" == 1 ]]; then
+            sshpass -e ssh "${args[@]}" "$target" 'set -eu; test -d /srv/vesta-accounting; test ! -e /srv/vesta-accounting/private/installed; docker image inspect vesta-accounting:2542be0f0738d7efeffd70ecb8fda99748c77c05 postgres:16-alpine nginx:1.27-alpine >/dev/null; echo preloaded_images_verified=true'
+            sshpass -e scp "${args[@]}" "$RUNNER_TEMP/release.tar.gz" "$RUNNER_TEMP/bootstrap.json" runtime/install-host.sh "$target:/srv/vesta-accounting/"
+            sshpass -e ssh "${args[@]}" "$target" 'bash /srv/vesta-accounting/install-host.sh --preloaded-private-only'
+            exit 0
+          fi
           sshpass -e ssh "${args[@]}" "$target" 'set -eu; umask 077; mkdir -p /srv/vesta-accounting; chmod 700 /srv/vesta-accounting; test ! -e /srv/vesta-accounting/private/installed; test "$(df -Pm /srv/vesta-accounting | awk "NR==2{print \$4}")" -ge 15000; test "$(awk "/^MemAvailable:/{print int(\$2/1024)}" /proc/meminfo)" -ge 3000; echo pre_transfer_capacity=pass'
           # Stream the exact CI-built image bundle without an extra remote tar copy.
           sshpass -e ssh "${args[@]}" "$target" 'set -o pipefail; gzip -dc | docker load >/dev/null; echo image_bundle_loaded=true' < "$RUNNER_TEMP/image.tar.gz"
