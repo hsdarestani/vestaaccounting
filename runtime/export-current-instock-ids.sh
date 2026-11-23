@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 cd /srv/vesta-accounting/release/runtime
 root=/srv/vesta-accounting/private
-docker compose --env-file "$root/.compose.env" -f compose.yml -f "$root/compose.source-sync.yml" --profile source-sync exec -T postgres psql -X -U accounting -d vesta_accounting -At -v ON_ERROR_STOP=1 <<'SQL'
+docker compose --env-file "$root/.compose.env" -f compose.yml -f "$root/compose.source-sync.yml" --profile source-sync exec -T postgres psql -X -q -U accounting -d vesta_accounting -At -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN READ ONLY;
 SET LOCAL statement_timeout='30000ms';
 COPY (
