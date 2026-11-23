@@ -9,7 +9,7 @@ echo opening_readiness_audit=begin
 compose exec -T postgres psql -X -U accounting -d vesta_accounting -At -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN READ ONLY;
 SET LOCAL statement_timeout='20000ms';
-WITH current_catalog AS (
+WITH stock_catalog AS (
  SELECT c.kind,r.payload,COALESCE(r.payload->>'stock_quantity','') AS raw_quantity
  FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
  WHERE c.kind IN ('products','variations')
@@ -24,7 +24,7 @@ SELECT 'catalog_readiness kind='||kind||
  ' stock_status_outofstock='||COUNT(*) FILTER(WHERE payload->>'stock_status'='outofstock')||
  ' price_missing='||COUNT(*) FILTER(WHERE NULLIF(TRIM(payload->>'price'),'') IS NULL)||
  ' currency_missing='||COUNT(*) FILTER(WHERE NULLIF(TRIM(payload->>'currency'),'') IS NULL)
-FROM current_catalog GROUP BY kind ORDER BY kind;
+FROM stock_catalog GROUP BY kind ORDER BY kind;
 SELECT 'product_type type='||COALESCE(r.payload->>'type','unknown')||' rows='||COUNT(*)
 FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
 WHERE c.kind='products'
