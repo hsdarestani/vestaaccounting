@@ -1,0 +1,43 @@
+name: Export currently in-stock Woo item IDs (read-only)
+on:
+  push:
+    branches: ['audit/export-current-vesta-instock-ids']
+    paths: ['runtime/export-current-instock-ids.sh','.github/workflows/export-current-instock-ids.yml']
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate audited read-only SQL export
+        run: bash -n runtime/export-current-instock-ids.sh
+      - name: Export in-stock identities from latest read-only WooCommerce snapshot
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          actual=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$actual" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          sshpass -e ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$SERVERIP" 'bash -s' < runtime/export-current-instock-ids.sh > /tmp/vesta-current-instock.csv
+          python3 - /tmp/vesta-current-instock.csv <<'PY'
+          import csv,sys
+          with open(sys.argv[1],newline='',encoding='utf-8') as f:
+              rows=list(csv.DictReader(f))
+          assert len(rows)>100 and {'kind','external_id','parent_id','stock_status'}.issubset(rows[0])
+          print('source_instock_row_count='+str(len(rows)))
+          print('source_status='+('ok' if all(x['stock_status']=='instock' for x in rows) else 'mismatch'))
+          PY
+      - name: Provide one-day private snapshot for preparing the workbook
+        uses: actions/upload-artifact@v4
+        with:
+          name: vesta-current-instock-ids
+          path: /tmp/vesta-current-instock.csv
+          retention-days: 1
+          if-no-files-found: error
