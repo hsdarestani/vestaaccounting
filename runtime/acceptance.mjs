@@ -12,7 +12,7 @@ try{
  await pool.query(await readFile(new URL('001_runtime.sql',import.meta.url),'utf8'));
  await pool.query(await readFile(new URL('002_cutover_plan.sql',import.meta.url),'utf8'));
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
- assert.equal(plan.effective_at_utc.toISOString(),'2026-11-23T20:30:00.000Z');
+ assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
  assert.equal(plan.currency_unit,'TOMAN');
  assert.equal(plan.status,'planned');
