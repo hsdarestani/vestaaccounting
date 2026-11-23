@@ -8,6 +8,7 @@ import {provision,authenticator,verifyPassword,passwordHash} from './auth.mjs';
 import {WooSource,persistPage,acceptWebhook,sourceService,normalizeSource} from './source.mjs';
 import {runCycle} from './sync.mjs';
 import {captureOpening} from './opening.mjs';
+import {repairRecentTail} from './tail-repair.mjs';
 const pool=poolFromEnv(),DB=new PgBinding(pool);
 try{
  await pool.query(await readFile(new URL('001_runtime.sql',import.meta.url),'utf8'));
@@ -70,5 +71,19 @@ try{
 
  env.MODE='source';const [sourceDashboard]=await request('/api/dashboard');assert.equal(sourceDashboard.posting_authorized,false);assert.equal(sourceDashboard.integration.orders,1);assert.equal(sourceDashboard.integration.initial_complete,true);assert.equal(sourceDashboard.integration.cutover.status,'planned');assert.equal(sourceDashboard.integration.cutover.currency_unit,'TOMAN');assert.equal(sourceDashboard.integration.opening.phase,'frozen_unverified');assert.equal(sourceDashboard.integration.opening.items,1);const [openingRows]=await request('/api/data/opening_review');assert.equal(openingRows.rows.length,1);assert.equal(openingRows.phase,'frozen_unverified');assert.equal(sourceDashboard.integration.refresh_in_progress,false);await pool.query("UPDATE sync_state SET status='running' WHERE kind='variations'");const [duringRefresh]=await request('/api/dashboard');assert.equal(duringRefresh.integration.complete,false);assert.equal(duringRefresh.integration.initial_complete,true);assert.equal(duringRefresh.integration.refresh_in_progress,true);const [duringRefreshRows]=await request('/api/data/integration');assert.ok(duringRefreshRows.rows.some(r=>r.source==='واردات اولیه ووکامرس'&&r.status==='تکمیل‌شده'));assert.ok(duringRefreshRows.rows.some(r=>r.source==='به‌روزرسانی‌های ووکامرس'&&r.status==='در حال دریافت تغییرات'));await pool.query("UPDATE sync_state SET status='complete' WHERE kind='variations'");await request('/api/data/source_orders');const [orderDetail]=await request('/api/source-detail?kind=orders&id=21');assert.equal(orderDetail.record.total,'1230');const [refundDetail]=await request('/api/source-detail?kind=refunds&id=31&parent=21');assert.equal(refundDetail.record.currency,'IRR');await request('/api/source-detail?kind=customers&id=8','GET',null,404);await request('/api/operate','POST',{kind:'sale',ref:'SHOULD-NOT-POST'},403);await request('/api/logout','POST',{});await request('/api/dashboard','GET',null,401);
  assert.equal((await pool.query("SELECT COALESCE(SUM(debit-credit),0) n FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted'")).rows[0].n,0);
+
+ // Repair a new Woo order in raw storage only, without posting a journal.
+ const originalOrders=(await pool.query("SELECT COUNT(*) n FROM raw_current WHERE kind='orders'")).rows[0].n;
+ const tailSource={page:async(kind,page,opts)=>{
+  assert.equal(opts.descending,true);
+  assert.equal(page,1);
+  return kind==='orders'?{rows:[{id:555,number:'555',date_modified_gmt:'2026-11-23T06:55:00',currency:'IRT',total:'2500',status:'processing',customer_id:8}],pages:1,total:originalOrders+1}:{rows:[],pages:1,total:0};
+ }};
+ const firstTail=await repairRecentTail(pool,tailSource,{pages:1});
+ assert.equal(firstTail[0].inserted,1);
+ const secondTail=await repairRecentTail(pool,tailSource,{pages:1});
+ assert.equal(secondTail[0].inserted,0);
+ assert.equal((await pool.query("SELECT COUNT(*) n FROM raw_current WHERE kind='orders'")).rows[0].n,originalOrders+1);
+ assert.equal((await pool.query("SELECT COUNT(*) n FROM journals WHERE status='posted'")).rows[0].n,0);
  console.log('PostgreSQL runtime acceptance complete:',checks,'HTTP assertions; immutable revisions, signed webhook replay, bounded sync and posting guard passed');
 }finally{await pool.end();}
