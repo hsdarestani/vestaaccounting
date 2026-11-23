@@ -48,6 +48,13 @@ export async function runCycle(pool,source,{budget=6,delay=1200}={}){
       if(due||control.requested)await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL WHERE kind IN('products','orders','variations','refunds')");
       for(const kind of new Set([...hourly,...eventKinds]))await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL WHERE kind=$1",[kind]);
     }
+  } else if(control.last_success){
+    // Keep orders/products/refunds current while a full variation scan is in
+    // progress. A long child scan must not block new WooCommerce orders.
+    // Preserve watermarks, only reset completed collections, and keep the
+    // variation cursor intact; duplicate raw source identities are idempotent.
+    await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL WHERE kind IN('products','orders','refunds') AND status='complete' AND (last_success IS NULL OR last_success<now()-interval '5 minutes')");
+    await pool.query("UPDATE sync_state SET status='pending',cursor=NULL,processed_count=0,expected_count=NULL WHERE kind IN('customers','categories','coupons') AND status='complete' AND (last_success IS NULL OR last_success<now()-interval '1 hour')");
   }
   runId=randomUUID();await pool.query("INSERT INTO sync_runs(id,status) VALUES($1,'running')",[runId]);let done=0;
   const failures=[];
