@@ -30,66 +30,8 @@ FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
 WHERE c.kind='products'
 GROUP BY COALESCE(r.payload->>'type','unknown') ORDER BY 1;
 SELECT 'simple_stock total='||COUNT(*)||
- ' quantity_unknown='||COUNT(*) FILTER(WHERE COALESCE(r.payload->>'stock_quantity','') !~ '^-?[0-9]+||COALESCE(NULLIF(r.payload->>'currency',''),'unknown')||' rows='||COUNT(*)
-FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
-WHERE c.kind='orders'
-GROUP BY COALESCE(NULLIF(r.payload->>'currency',''),'unknown') ORDER BY 1;
-SELECT 'ledger_readiness financial_products='||(SELECT COUNT(*) FROM products)||
- ' opening_reference_rows='||(SELECT COUNT(*) FROM opening_refs)||
- ' posted_journals='||(SELECT COUNT(*) FROM journals WHERE status='posted')||
- ' financial_periods='||(SELECT COUNT(*) FROM periods);
-SELECT 'initial_import_completed='||(SELECT CASE WHEN last_success IS NULL THEN 'false' ELSE 'true' END FROM sync_control WHERE id=1);
-COMMIT;
-SQL
-compose exec -T sync node --input-type=module <<'NODE'
-import {WooSource} from './source.mjs';
-const source=new WooSource({
- origin:process.env.WOO_ORIGIN,
- key:process.env.WOO_KEY,
- secret:process.env.WOO_SECRET,
- pageSize:1,catalogAdapter:process.env.WOO_CATALOG_ADAPTER==='1'
-});
-for(const kind of ['products','orders','customers','categories','coupons']){
- try{
-  const r=await source.page(kind,1,{});
-  console.log('live_woo_total kind='+kind+' total='+r.total);
- }catch(e){
-  console.log('live_woo_total kind='+kind+' error='+(/^woo_http_[0-9]{3}$/.test(e.message)?e.message:'source_probe_error'));
- }
-}
-NODE
-echo opening_readiness_audit=end
-)||
- ' quantity_negative='||COUNT(*) FILTER(WHERE COALESCE(r.payload->>'stock_quantity','') ~ '^-[0-9]+||COALESCE(NULLIF(r.payload->>'currency',''),'unknown')||' rows='||COUNT(*)
-FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
-WHERE c.kind='orders'
-GROUP BY COALESCE(NULLIF(r.payload->>'currency',''),'unknown') ORDER BY 1;
-SELECT 'ledger_readiness financial_products='||(SELECT COUNT(*) FROM products)||
- ' opening_reference_rows='||(SELECT COUNT(*) FROM opening_refs)||
- ' posted_journals='||(SELECT COUNT(*) FROM journals WHERE status='posted')||
- ' financial_periods='||(SELECT COUNT(*) FROM periods);
-SELECT 'initial_import_completed='||(SELECT CASE WHEN last_success IS NULL THEN 'false' ELSE 'true' END FROM sync_control WHERE id=1);
-COMMIT;
-SQL
-compose exec -T sync node --input-type=module <<'NODE'
-import {WooSource} from './source.mjs';
-const source=new WooSource({
- origin:process.env.WOO_ORIGIN,
- key:process.env.WOO_KEY,
- secret:process.env.WOO_SECRET,
- pageSize:1,catalogAdapter:process.env.WOO_CATALOG_ADAPTER==='1'
-});
-for(const kind of ['products','orders','customers','categories','coupons']){
- try{
-  const r=await source.page(kind,1,{});
-  console.log('live_woo_total kind='+kind+' total='+r.total);
- }catch(e){
-  console.log('live_woo_total kind='+kind+' error='+(/^woo_http_[0-9]{3}$/.test(e.message)?e.message:'source_probe_error'));
- }
-}
-NODE
-echo opening_readiness_audit=end
-)||
+ ' quantity_unknown='||COUNT(*) FILTER(WHERE COALESCE(r.payload->>'stock_quantity','') !~ '^-?[0-9]+$')||
+ ' quantity_negative='||COUNT(*) FILTER(WHERE COALESCE(r.payload->>'stock_quantity','') ~ '^-[0-9]+$')||
  ' outofstock='||COUNT(*) FILTER(WHERE r.payload->>'stock_status'='outofstock')
 FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
 WHERE c.kind='products' AND r.payload->>'type'='simple';
