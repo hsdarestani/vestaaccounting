@@ -28,11 +28,11 @@ FROM stock_catalog GROUP BY kind ORDER BY kind;
 SELECT 'product_type type='||COALESCE(r.payload->>'type','unknown')||' rows='||COUNT(*)
 FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
 WHERE c.kind='products'
-GROUP BY 1 ORDER BY 1;
+GROUP BY COALESCE(r.payload->>'type','unknown') ORDER BY 1;
 SELECT 'order_currency currency='||COALESCE(NULLIF(r.payload->>'currency',''),'unknown')||' rows='||COUNT(*)
 FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
 WHERE c.kind='orders'
-GROUP BY 1 ORDER BY 1;
+GROUP BY COALESCE(NULLIF(r.payload->>'currency',''),'unknown') ORDER BY 1;
 SELECT 'ledger_readiness financial_products='||(SELECT COUNT(*) FROM products)||
  ' opening_reference_rows='||(SELECT COUNT(*) FROM opening_refs)||
  ' posted_journals='||(SELECT COUNT(*) FROM journals WHERE status='posted')||
