@@ -27,6 +27,12 @@ CREATE TABLE IF NOT EXISTS opening_capture_items (
  PRIMARY KEY(capture_id,source_kind,external_id,parent_id)
 );
 CREATE INDEX IF NOT EXISTS opening_capture_stock_issues ON opening_capture_items(source_kind,stock_quantity);
+DROP TRIGGER IF EXISTS opening_capture_guard ON opening_capture;
+CREATE TRIGGER opening_capture_guard BEFORE UPDATE OR DELETE ON opening_capture
+FOR EACH ROW EXECUTE FUNCTION runtime_immutable();
+DROP TRIGGER IF EXISTS opening_capture_items_guard ON opening_capture_items;
+CREATE TRIGGER opening_capture_items_guard BEFORE UPDATE OR DELETE ON opening_capture_items
+FOR EACH ROW EXECUTE FUNCTION runtime_immutable();
 CREATE OR REPLACE VIEW opening_live_review AS
 SELECT
  c.kind AS source_kind,c.external_id,c.parent_id,c.revision_id,c.checked_at AS source_checked_at,
