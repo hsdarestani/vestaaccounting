@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {poolFromEnv} from './pg.mjs';
 import {WooSource,persistPage} from './source.mjs';
 import {captureOpening} from './opening.mjs';
+import {repairRecentTail} from './tail-repair.mjs';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const kinds=['products','orders','customers','categories','coupons','variations','refunds'];
 const stamp=()=>new Date().toISOString().replace(/\.\d{3}Z$/,'Z');
@@ -122,4 +123,12 @@ export async function runCycle(pool,source,{budget=6,delay=1200}={}){
   if(remaining===0){await pool.query("UPDATE sync_control SET requested=false,last_success=now(),last_scan=CASE WHEN last_scan IS NULL OR last_scan<now()-interval '7 days' THEN now() ELSE last_scan END,last_error=NULL WHERE id=1");await pool.query("UPDATE sync_events SET status='review' WHERE status='pending' AND topic LIKE '%.deleted'");await pool.query("UPDATE sync_events e SET status='processed' WHERE e.status='pending' AND EXISTS(SELECT 1 FROM raw_current c WHERE c.external_id=e.source_id AND c.checked_at>=e.received_at AND ((e.topic LIKE 'product.%' AND c.kind IN('products','variations')) OR (e.topic LIKE 'order.%' AND c.kind='orders') OR (e.topic LIKE 'customer.%' AND c.kind='customers') OR (e.topic LIKE 'coupon.%' AND c.kind='coupons')))");}await pool.query("UPDATE sync_runs SET status=$2,finished=now(),reason=$3 WHERE id=$1",[runId,remaining?'checkpointed':'complete',failures[0]||'']);return {pages:done,remaining,...(failures.length?{retrying:true,reason:failures[0]}:{})};
  }catch(e){if(runId)await pool.query("UPDATE sync_runs SET status='failed',finished=now(),reason=$2 WHERE id=$1",[runId,safeReason(e)]);return {failed:true,reason:safeReason(e)};}finally{try{await lock.query('SELECT pg_advisory_unlock(67226611)');}finally{lock.release();}}
 }
-if(process.argv[1]&&import.meta.url===new URL('file:'+process.argv[1]).href){const pool=poolFromEnv();let source;try{source=new WooSource({origin:process.env.WOO_ORIGIN,key:process.env.WOO_KEY,secret:process.env.WOO_SECRET,pageSize:30,catalogAdapter:process.env.WOO_CATALOG_ADAPTER==='1'});}catch{await pool.query("UPDATE sync_control SET last_error='read_only_credentials_missing' WHERE id=1");await pool.end();process.exit(2);}for(;;){try{const opening=await captureOpening(pool);if(opening.captured)console.log(JSON.stringify({event:'opening_source_evidence_frozen',unverified:true,items:opening.items,observedAt:opening.observedAt}));}catch(e){console.error(JSON.stringify({event:'opening_capture_error',class:e?.name||'Error'}));}const result=await runCycle(pool,source,{budget:9,delay:1800});console.log(JSON.stringify({event:'source_sync',...result}));await sleep(result.failed?90000:result.idle?60000:25000);}}
+if(process.argv[1]&&import.meta.url===new URL('file:'+process.argv[1]).href){const pool=poolFromEnv();let source;try{source=new WooSource({origin:process.env.WOO_ORIGIN,key:process.env.WOO_KEY,secret:process.env.WOO_SECRET,pageSize:30,catalogAdapter:process.env.WOO_CATALOG_ADAPTER==='1'});}catch{await pool.query("UPDATE sync_control SET last_error='read_only_credentials_missing' WHERE id=1");await pool.end();process.exit(2);}let lastTailProbe=0;for(;;){try{const opening=await captureOpening(pool);if(opening.captured)console.log(JSON.stringify({event:'opening_source_evidence_frozen',unverified:true,items:opening.items,observedAt:opening.observedAt}));}catch(e){console.error(JSON.stringify({event:'opening_capture_error',class:e?.name||'Error'}));}if(Date.now()-lastTailProbe>300000){try{
+  const initialized=(await pool.query('SELECT last_success FROM sync_control WHERE id=1')).rows[0]?.last_success;
+  if(initialized){
+    const coverage=await repairRecentTail(pool,source,{pages:4});
+    console.log(JSON.stringify({event:'recent_source_identity_repair',coverage}));
+    lastTailProbe=Date.now();
+  }
+ }catch(e){lastTailProbe=Date.now()-210000;console.error(JSON.stringify({event:'recent_source_identity_probe_failed',class:e?.name||'Error'}));}}
+ const result=await runCycle(pool,source,{budget:9,delay:1800});console.log(JSON.stringify({event:'source_sync',...result}));await sleep(result.failed?90000:result.idle?60000:25000);}}
