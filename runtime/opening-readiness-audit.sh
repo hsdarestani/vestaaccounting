@@ -71,3 +71,21 @@ for(const kind of ['products','orders','customers','categories','coupons']){
 }
 NODE
 echo opening_readiness_audit=end
+
+
+echo post_cutover_readonly_audit=begin
+compose exec -T postgres psql -X -q -U accounting -d vesta_accounting -At -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN READ ONLY;
+SET LOCAL statement_timeout='30000ms';
+SELECT 'audit_time_utc='||(now() AT TIME ZONE 'UTC');
+SELECT 'cutover '||row_to_json(t)::text FROM (SELECT effective_at_utc,timezone,currency_unit,status,stock_snapshot_status FROM accounting_cutover WHERE id=1) t;
+SELECT 'capture '||row_to_json(t)::text FROM (SELECT id,cutover_at,observed_at,last_full_sync_at,verification_status,source FROM opening_capture WHERE id=1) t;
+SELECT 'capture_items total='||COUNT(*)||' unknown='||COUNT(*) FILTER(WHERE stock_quantity IS NULL)||' negative='||COUNT(*) FILTER(WHERE stock_quantity<0)||' instock='||COUNT(*) FILTER(WHERE stock_status='instock')||' outofstock='||COUNT(*) FILTER(WHERE stock_status='outofstock')||' stale_24h='||COUNT(*) FILTER(WHERE source_checked_at<now()-interval '24 hours')||' pre_cutover_source='||COUNT(*) FILTER(WHERE source_checked_at<'2026-11-23 20:30:00+00'::timestamptz)||' no_sku='||COUNT(*) FILTER(WHERE trim(sku)='') FROM opening_capture_items;
+SELECT 'capture_by_kind kind='||source_kind||' count='||COUNT(*)||' unknown='||COUNT(*) FILTER(WHERE stock_quantity IS NULL)||' negative='||COUNT(*) FILTER(WHERE stock_quantity<0)||' stale_24h='||COUNT(*) FILTER(WHERE source_checked_at<now()-interval '24 hours') FROM opening_capture_items GROUP BY source_kind ORDER BY source_kind;
+SELECT 'current_source kind='||kind||' count='||COUNT(*)||' newest='||MAX(checked_at) FROM raw_current GROUP BY kind ORDER BY kind;
+SELECT 'control '||row_to_json(t)::text FROM (SELECT * FROM sync_control WHERE id=1) t;
+SELECT 'ledger posted_journals='||(SELECT COUNT(*) FROM journals WHERE status='posted')||' opening_refs='||(SELECT COUNT(*) FROM opening_refs)||' products='||(SELECT COUNT(*) FROM products);
+SELECT 'capture_revision_missing='||COUNT(*) FROM opening_capture_items i LEFT JOIN raw_revisions r ON r.id=i.revision_id WHERE r.id IS NULL;
+COMMIT;
+SQL
+echo post_cutover_readonly_audit=end
