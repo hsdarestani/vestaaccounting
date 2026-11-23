@@ -19,3 +19,11 @@ Opening procedure to be completed: timestamp stock snapshots, validate sellable 
 Fiscal locks prevent posting and require owner action with a reason to reopen. Corrections use exact inverse reversal drafts and require approval/post transitions. Closing rules and financial statements need further review.
 
 Tax readiness remains unverified: obtain current official taxpayer-system, electronic invoice, VAT, exemptions and taxpayer registration requirements applicable to the entity. Do not infer rates, invoice schema or remittance duties from this sample chart. Review with an Iranian professional accountant and preserve official versioned policy evidence.
+
+## Owner-approved new accounting cutover — Vesta Cosmetics (2026-11-23)
+
+- **Effective start:** 2026-11-24 00:00:00 Asia/Tehran (**1405/09/03**, 2026-11-23T20:30:00Z). Owner approved this exact date.
+- **Accounting unit:** integer **Toman**. WooCommerce IRT source amounts are preserved as supplied and must be explicitly reconciled before posting; do not treat unknown purchase costs as zero.
+- **Status:** `planned` in a dedicated PostgreSQL metadata record. This is **not** an authorization to post financial journals, finalize inventory quantities, migrate historical documents or turn off Mahak/Bazara.
+- **Opening inventory:** WooCommerce is the authoritative stock source. Capture or reconstruct a stock snapshot **as of the exact cutover instant**, with evidence timestamp and any intervening movements; do not substitute an earlier/later live stock count as the midnight opening balance.
+- **Before activation:** review missing stock/SKUs, cost evidence, bank/cash, payment clearing, receivables and payables; obtain accountant/owner sign-off for balanced opening journals. Production posting remains disabled.
