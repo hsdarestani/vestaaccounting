@@ -7,10 +7,12 @@ import {PgBinding,poolFromEnv} from './pg.mjs';
 import {provision,authenticator,verifyPassword,passwordHash} from './auth.mjs';
 import {WooSource,persistPage,acceptWebhook,sourceService,normalizeSource} from './source.mjs';
 import {runCycle} from './sync.mjs';
+import {captureOpening} from './opening.mjs';
 const pool=poolFromEnv(),DB=new PgBinding(pool);
 try{
  await pool.query(await readFile(new URL('001_runtime.sql',import.meta.url),'utf8'));
  await pool.query(await readFile(new URL('002_cutover_plan.sql',import.meta.url),'utf8'));
+ await pool.query(await readFile(new URL('003_opening_evidence.sql',import.meta.url),'utf8'));
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -33,6 +35,12 @@ try{
  const raw=Buffer.from(JSON.stringify({id:10})),secret='test-only-webhook',signature=createHmac('sha256',secret).update(raw).digest('base64');const event={secret,payload:raw,signature,topic:'product.updated',deliveryId:'synthetic-1'};assert.equal(await acceptWebhook(pool,event),true);assert.equal(await acceptWebhook(pool,event),true);assert.equal((await pool.query('SELECT count(*) n FROM sync_events')).rows[0].n,1);assert.equal(await acceptWebhook(pool,{...event,signature:'bad'}),false);const missing=Buffer.from(JSON.stringify({id:999}));assert.equal(await acceptWebhook(pool,{...event,payload:missing,signature:createHmac('sha256',secret).update(missing).digest('base64'),deliveryId:'synthetic-unseen'}),true);
  const mock=(url,opts)=>{assert.equal(opts.method,'GET');const p=url.pathname.split('/').at(-1);if(['categories','coupons'].includes(p)){assert.equal(url.searchParams.get('orderby'),'id');assert.equal(url.searchParams.get('order'),'asc');}const data={products:[{id:10,name:'Changed',type:'variable',sku:'SYN-10',date_modified_gmt:'2026-01-02T01:00:00',price:'12.00',variations:[11]}],orders:[{id:21,customer_id:8,currency:'IRR',total:'1230',status:'completed',date_modified_gmt:'2026-01-02T01:00:00',refunds:[{id:31}]}],customers:[{id:8,first_name:'Synthetic'}],variations:[{id:11,sku:'SYN-11',stock_quantity:6,price:'12.00'}],refunds:[{id:31,amount:'100'}],categories:[{id:4,name:'Sample'}],coupons:[{id:5,code:'DEMO',amount:'10'}]}[p]||[];return Promise.resolve(Response.json(data,{headers:{'X-WP-Total':String(data.length),'X-WP-TotalPages':data.length?'1':'0'}}));};
  const source=new WooSource({origin:'https://example.invalid/',key:'synthetic-key',secret:'synthetic-secret',fetcher:mock,pageSize:5});for(let i=0;i<12;i++){const result=await runCycle(pool,source,{budget:2,delay:0});assert.equal(result.failed,undefined);if(result.remaining===0)break;}const summary=await env.integration.summary();assert.ok(summary.complete);assert.equal(summary.orders,1);assert.equal(summary.variations,1);assert.equal(summary.refunds,1);assert.equal(summary.pending,1);
+ const openingPreview=(await pool.query('SELECT COUNT(*) n FROM opening_live_review')).rows[0].n;assert.equal(openingPreview,1);
+ assert.equal((await captureOpening(pool,{observedAt:new Date('2026-11-23T20:29:59Z')})).due,false);
+ const frozen=await captureOpening(pool,{observedAt:new Date('2026-11-23T20:30:01Z')});assert.equal(frozen.captured,true);assert.equal(frozen.unverified,true);
+ assert.equal((await pool.query('SELECT COUNT(*) n FROM opening_capture_items')).rows[0].n,1);
+ assert.equal((await captureOpening(pool,{observedAt:new Date('2026-11-23T20:30:02Z')})).already,true);
+ await assert.rejects(()=>pool.query('DELETE FROM opening_capture_items'),/immutable record/);
  // A first-run category import with duplicate IDs must be automatically re-scanned.
  await pool.query("UPDATE sync_control SET last_success=NULL WHERE id=1");
  await pool.query("UPDATE sync_state SET expected_count=2 WHERE kind IN ('categories','customers')");
