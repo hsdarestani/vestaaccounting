@@ -74,6 +74,7 @@ try{
 
  // Repair a new Woo order in raw storage only, without posting a journal.
  const originalOrders=(await pool.query("SELECT COUNT(*) n FROM raw_current WHERE kind='orders'")).rows[0].n;
+ const postedBeforeTail=(await pool.query("SELECT COUNT(*) n FROM journals WHERE status='posted'")).rows[0].n;
  const tailSource={page:async(kind,page,opts)=>{
   assert.equal(opts.descending,true);
   assert.equal(page,1);
@@ -84,6 +85,6 @@ try{
  const secondTail=await repairRecentTail(pool,tailSource,{pages:1});
  assert.equal(secondTail[0].inserted,0);
  assert.equal((await pool.query("SELECT COUNT(*) n FROM raw_current WHERE kind='orders'")).rows[0].n,originalOrders+1);
- assert.equal((await pool.query("SELECT COUNT(*) n FROM journals WHERE status='posted'")).rows[0].n,0);
+ assert.equal((await pool.query("SELECT COUNT(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeTail);
  console.log('PostgreSQL runtime acceptance complete:',checks,'HTTP assertions; immutable revisions, signed webhook replay, bounded sync and posting guard passed');
 }finally{await pool.end();}
