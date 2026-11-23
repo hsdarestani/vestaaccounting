@@ -55,6 +55,7 @@ for name, wanted in {
     next_path.chmod(0o600)
     os.replace(next_path, path)
 PY
+compose run --rm --no-deps --pull never app node migrate.mjs
 compose up -d --no-deps --pull never --wait app
 compose up -d --no-deps --pull never --wait --force-recreate proxy
 python3 "$ROOT/private/verify-accounting-login.py" http://127.0.0.1:18089 "$bootstrap" "$release"
