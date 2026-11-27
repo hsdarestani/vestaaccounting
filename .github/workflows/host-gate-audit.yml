@@ -40,6 +40,9 @@ jobs:
             file="/srv/vesta-accounting/$name"
             if test -f "$file" && test ! -L "$file"; then du -m -- "$file" | awk -v name="$name" '{print "temporary_archive=" name " mib=" $1}'; fi
           done
+          docker system df --format 'docker_storage={{.Type}} size={{.Size}} reclaimable={{.Reclaimable}}'
+          du -sm -- /srv/vesta-accounting/backups /srv/vesta-accounting/private /srv/vesta-accounting/release | awk '{print "accounting_directory_mib=" $1 " type=" substr($2,22)}'
+          df -Pm /srv/vesta-accounting | awk 'NR==2{print "filesystem_total_mib=" $2}'
           cd /srv/vesta-accounting/release/runtime
           docker compose --env-file /srv/vesta-accounting/private/.compose.env -f compose.yml exec -T postgres psql -X -A -t -U accounting -d vesta_accounting -v ON_ERROR_STOP=1 <<'SQL'
           BEGIN READ ONLY;
@@ -48,6 +51,7 @@ jobs:
           WHERE c.kind IN ('orders','refunds') AND (r.payload->>'date_created_gmt')>='2026-11-23T20:30:00'
            AND (r.payload->>'date_created_gmt')<'2026-11-26T20:30:00'
           GROUP BY c.kind,((r.payload->>'date_created_gmt')::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tehran')::date ORDER BY 1;
+          SELECT 'database_bytes='||pg_database_size(current_database());
           SELECT 'opening_costs='||count(*) FROM opening_input_costs_v1;
           SELECT 'opening_evidence_rows='||count(*) FROM opening_input_balances_v1;
           SELECT 'financial_documents='||count(*) FROM documents;
