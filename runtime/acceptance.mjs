@@ -161,6 +161,12 @@ try{
  await pool.query(settlementMigration);
  const [updatedSettlementReport]=await request('/api/data/settlement_evidence');
  assert.equal(updatedSettlementReport.rows.find(r=>r.id===savedSettlement.id).settlement_status,'draft_created');
+ const [netEvidence]=await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-NET',bank_ref:'SYN-BANK-NET',ledger_basis:'net_already_expensed'},201);
+ const [netDraft]=await request('/api/operate','POST',{kind:'settlement_draft',id:netEvidence.id},201);
+ assert.deepEqual((await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[netDraft.id])).rows,[{account:'1012',debit:100,credit:0},{account:'1310',debit:0,credit:100}]);
+ const [unknownEvidence]=await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-UNKNOWN',bank_ref:'SYN-BANK-UNKNOWN',ledger_basis:'unknown'},201);
+ await request('/api/operate','POST',{kind:'settlement_draft',id:unknownEvidence.id},409);
+
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
