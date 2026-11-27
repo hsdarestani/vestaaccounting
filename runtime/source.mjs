@@ -1,3 +1,4 @@
+import {wooReconciliation} from './woo-reconciliation.mjs';
 import {correctPurchaseCost,openingReviewModules,reviewOpeningInput} from './opening-review.mjs';
 import {createHash,createHmac,timingSafeEqual,randomUUID} from 'node:crypto';
 const hash=v=>createHash('sha256').update(v).digest('hex');
@@ -54,7 +55,8 @@ export function sourceService(pool){return {
  const opening={phase:capture?'frozen_unverified':'live_preview',cutover_at:cutover?.effective_at_utc||null,observed_at:capture?.observed_at||null,source_full_sync_at:capture?.last_full_sync_at||null,verification_status:capture?.verification_status||'not_captured',...Object.fromEntries(Object.entries(o).map(([k,v])=>[k,Number(v)]))};
  return {cutover,opening,products:counts.products||0,variations:counts.variations||0,orders:counts.orders||0,customers:counts.customers||0,refunds:counts.refunds||0,coupons:counts.coupons||0,categories:counts.categories||0,last_success:s.last_success,pending:Number(e.pending),failed:Number(e.failed)+Number(progress.failed),last_error:s.last_error,complete:Number(progress.complete)===kinds.length,initial_complete:Boolean(s.last_success),refresh_in_progress:Boolean(s.last_success)&&Number(progress.complete)!==kinds.length};},
  async retry(){await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return {queued:true};},
- async list(module,url){if(openingReviewModules.includes(module))return reviewOpeningInput(pool,module,url);
+ async list(module,url){if(module==='woo_reconciliation')return wooReconciliation(pool,url);
+  if(openingReviewModules.includes(module))return reviewOpeningInput(pool,module,url);
   if(module==='opening_review'){
    const capture=(await pool.query('SELECT observed_at,last_full_sync_at,verification_status FROM opening_capture WHERE id=1')).rows[0]||null;
    const p=Math.max(0,Math.min(100000,Math.trunc(Number(url.searchParams.get('page')||0)||0)));

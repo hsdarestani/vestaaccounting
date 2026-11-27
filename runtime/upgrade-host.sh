@@ -22,11 +22,9 @@ compose() {
   fi
   docker compose --env-file "$ROOT/private/.compose.env" -f compose.yml "${extra[@]}" "$@"
 }
-docker_root=$(docker info --format '{{.DockerRootDir}}')
-for filesystem in "$ROOT" "$docker_root"; do
-  (( $(df -Pm "$filesystem" | awk 'NR==2{print $4}') >= 11264 ))
-done
-(( $(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo) >= 2200 ))
+mode=${2:-adapter}
+image_bytes=$(docker image inspect --format '{{.Size}}' "vesta-accounting:$release")
+bash "$ROOT/private/accounting-upgrade-capacity.sh" "$mode" "$image_bytes"
 snapshot=$(mktemp -d "$ROOT/backups/upgrade.XXXXXXXX")
 cp -- "$ROOT/private/.compose.env" "$ROOT/private/.private.env" "$snapshot/"
 compose exec -T postgres pg_dump -U accounting -d vesta_accounting -Fc > "$snapshot/accounting.dump"

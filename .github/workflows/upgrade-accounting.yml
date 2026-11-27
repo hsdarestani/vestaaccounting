@@ -3,7 +3,7 @@ name: Upgrade Vesta Accounting on the existing host
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/upgrade-accounting.yml', 'runtime/upgrade-host.sh', 'runtime/sync.mjs', 'runtime/source.mjs', 'runtime/acceptance.mjs', 'runtime/vesta-accounting-catalog.php', 'runtime/install-catalog-adapter.sh', 'runtime/004_opening_input_review.sql', 'runtime/opening-review.mjs', 'edge-demo/ui.mjs', 'edge-demo/worker.mjs']
+    paths: ['.github/workflows/upgrade-accounting.yml', 'runtime/upgrade-host.sh', 'runtime/accounting-upgrade-capacity.sh', 'runtime/sync.mjs', 'runtime/source.mjs', 'runtime/acceptance.mjs', 'runtime/vesta-accounting-catalog.php', 'runtime/install-catalog-adapter.sh', 'runtime/004_opening_input_review.sql', 'runtime/opening-review.mjs', 'edge-demo/ui.mjs', 'edge-demo/worker.mjs']
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,6 +29,7 @@ jobs:
           --health-retries 8
     steps:
       - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
       - uses: actions/setup-node@v4
         with: {node-version: '24'}
       - name: Verify release against a synthetic PostgreSQL instance
@@ -38,6 +39,7 @@ jobs:
           npm ci --prefix runtime --ignore-scripts
           node runtime/acceptance.mjs
           bash -n runtime/upgrade-host.sh runtime/install-catalog-adapter.sh
+          bash -n runtime/accounting-upgrade-capacity.sh
       - name: Build only the accounting image
         run: |
           docker build -f runtime/Dockerfile -t "vesta-accounting:$GITHUB_SHA" .
@@ -66,13 +68,23 @@ jobs:
           export SSHPASS="$ROOTPASS"
           args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
           target="root@$SERVERIP"
-          sshpass -e ssh "${args[@]}" "$target" 'set -e; test -f /srv/vesta-accounting/private/installed; for p in /srv/vesta-accounting "$(docker info --format "{{.DockerRootDir}}")"; do test "$(df -Pm "$p" | awk "NR==2{print \$4}")" -ge 11776; done; test "$(awk "/^MemAvailable:/{print int(\$2/1024)}" /proc/meminfo)" -ge 2200; echo accounting_upgrade_capacity_verified=true'
+          mode=adapter
+          live_release=$(curl -fsS --max-time 15 https://hesab.vesta-cosmetics.ir/health | jq -er '.version')
+          if [[ "$live_release" =~ ^[a-f0-9]{40}$ ]] && git cat-file -e "$live_release^{commit}" &&
+             git diff --quiet "$live_release" "$GITHUB_SHA" -- runtime/install-catalog-adapter.sh runtime/vesta-accounting-catalog.php; then
+            mode=app-only
+          fi
+          image_bytes=$(docker image inspect --format '{{.Size}}' "vesta-accounting:$GITHUB_SHA")
+          [[ "$image_bytes" =~ ^[1-9][0-9]{0,11}$ ]]
+          sshpass -e ssh "${args[@]}" "$target" "bash -s -- '$mode' '$image_bytes'" < runtime/accounting-upgrade-capacity.sh
           sshpass -e ssh "${args[@]}" "$target" 'bash -o pipefail -c "gzip -dc | docker load >/dev/null"' < "$RUNNER_TEMP/accounting-image.gz"
-          sshpass -e scp "${args[@]}" runtime/{install-catalog-adapter.sh,vesta-accounting-catalog.php} "$target:/srv/vesta-accounting/private/"
-          sshpass -e ssh "${args[@]}" "$target" 'bash /srv/vesta-accounting/private/install-catalog-adapter.sh'
-          sshpass -e scp "${args[@]}" runtime/upgrade-host.sh runtime/verify-accounting-login.py "$target:/srv/vesta-accounting/private/"
+          if [[ "$mode" == adapter ]]; then
+            sshpass -e scp "${args[@]}" runtime/{install-catalog-adapter.sh,vesta-accounting-catalog.php} "$target:/srv/vesta-accounting/private/"
+            sshpass -e ssh "${args[@]}" "$target" 'bash /srv/vesta-accounting/private/install-catalog-adapter.sh'
+          fi
+          sshpass -e scp "${args[@]}" runtime/upgrade-host.sh runtime/accounting-upgrade-capacity.sh runtime/verify-accounting-login.py "$target:/srv/vesta-accounting/private/"
           sshpass -e scp "${args[@]}" "$RUNNER_TEMP/upgrade-login.json" "$target:/srv/vesta-accounting/private/upgrade-login.json"
-          sshpass -e ssh "${args[@]}" "$target" "bash /srv/vesta-accounting/private/upgrade-host.sh '$GITHUB_SHA'"
+          sshpass -e ssh "${args[@]}" "$target" "bash /srv/vesta-accounting/private/upgrade-host.sh '$GITHUB_SHA' '$mode'"
 
       - name: Verify the deployed HTTPS accounting interface
         env:
