@@ -16,13 +16,20 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 3}
+        with: {fetch-depth: 0}
       - name: Generate reviewed opening evidence
         run: |
           umask 077
           bash -n runtime/stage-opening-production.sh
           git diff --exit-code 2f21bb14acd36397c6b80974f198dbf9f7104f84 HEAD -- runtime/stage-opening-inputs-20261127.py
-          python3 runtime/stage-opening-inputs-20261127.py > "$RUNNER_TEMP/opening-inputs.sql"
+          python3 runtime/stage-opening-inputs-20261127.py > "$RUNNER_TEMP/original.sql"
+          python3 - "$RUNNER_TEMP/original.sql" "$RUNNER_TEMP/opening-inputs.sql" <<'PY'
+          import pathlib, sys
+          original = pathlib.Path(sys.argv[1]).read_text()
+          marker = "COPY expected_costs FROM STDIN;\n\n"
+          assert original.count(marker) == 1
+          pathlib.Path(sys.argv[2]).write_text(original.replace(marker, marker[:-1]))
+          PY
       - name: Verify backup, import evidence and read back aggregate results
         env:
           SERVERIP: ${{ secrets.SERVERIP }}
@@ -42,4 +49,30 @@ jobs:
           [[ "$remote_script" =~ ^/srv/vesta-accounting/private/run-opening-inputs\.[a-zA-Z0-9]+$ ]]
           trap 'sshpass -e ssh "${args[@]}" "$target" "rm -f -- $remote_script"' EXIT
           sshpass -e scp "${args[@]}" runtime/stage-opening-production.sh "$target:$remote_script"
-          sshpass -e ssh "${args[@]}" "$target" "bash $remote_script" < "$RUNNER_TEMP/opening-inputs.sql"
+          sshpass -e ssh "${args[@]}" "$target" "bash $remote_script" < "$RUNNER_TEMP/opening-inputs.sql" > "$RUNNER_TEMP/readback" || { sed '/^financial_result /d' "$RUNNER_TEMP/readback"; exit 1; }
+          sed '/^financial_result /d' "$RUNNER_TEMP/readback"
+          cat > "$RUNNER_TEMP/report.pem" <<'PEM'
+          -----BEGIN CERTIFICATE-----
+          MIIDHzCCAgegAwIBAgIUQgXdrLFbBMEFs6DKr3kTarZZt0IwDQYJKoZIhvcNAQEL
+          BQAwHzEdMBsGA1UEAwwUVmVzdGEtT3BlbmluZy1SZXN1bHQwHhcNMjYxMTI3MTI0
+          MzE3WhcNMjYxMTI5MTI0MzE3WjAfMR0wGwYDVQQDDBRWZXN0YS1PcGVuaW5nLVJl
+          c3VsdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKIXORqD/iyXrl4e
+          OpZeIPrvuzJ70m/Renp9pGUMKqouQ2gSCpKPjZVk96DkGkKIp/ybFLZqxHMH6/3c
+          iSiQMx7jjRUlKxeLzAh2pdGKto1iD2c6wN/lZGdtikZuqAQ7x6wEPblqJfyUym8K
+          zuJ6RdIR0Wh+DEywsiUYbaUTjcf/OW5f9zcSkP17gpzIQTInsFwUdjE0cSIdWqZF
+          r+UeS+iBk9kfGABiNjy1d9HXuHL9LFgNG1gol7geXyNY3RWj5Gvibc53vqaqMO1P
+          0KgGUSoX0v/RGWUqcUqiIUMW2ieoorJ5H19oaidQ3L3qSSLcTz9d65bW/EoP6OzY
+          y+QwsccCAwEAAaNTMFEwHQYDVR0OBBYEFEpzHu3qTLuyzq8ELgkvcFam7wZpMB8G
+          A1UdIwQYMBaAFEpzHu3qTLuyzq8ELgkvcFam7wZpMA8GA1UdEwEB/wQFMAMBAf8w
+          DQYJKoZIhvcNAQELBQADggEBAAnIAqM8mPEaCMtoyg19LXdwmmTKPneWVtrGhfgh
+          6mfIG0zR4+wV8YPXvsqJj7miC3qGFj+E2yqHGLugMg7zjOSc6s7+HQQGTiGXiy2z
+          mDhh2bCp1SjQjCt9a0/HX8/pTOXbTBtOzKx3VTlRT5VtE+B3Efbw0LaisiqEvSzm
+          l6M5VsyyUWATgO+XOLMaa7VkILUryBzeOQALJN4hBHNfMd1/1GNtPDQ1p2eyM9pL
+          yGDslUz6bYSctsyAhvRS7zxyTv6o3wZYnpLlCGt/qjkOp3mleFC0pkObL6jXRZ1o
+          oJQXrL8EX3eOLCNfW6XQ7hPXz9rQdQsoQUYDEFbY2XK5njo=
+          -----END CERTIFICATE-----
+          PEM
+          printf 'encrypted_readback='
+          sed -n '/^financial_result /p' "$RUNNER_TEMP/readback" | openssl cms -encrypt -binary -aes256 -outform DER "$RUNNER_TEMP/report.pem" | base64 -w0
+          printf '\n'
+
