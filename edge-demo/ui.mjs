@@ -64,8 +64,8 @@ function browserApp(){
   Object.assign(labels,{captured_quantity:'تعداد برداشت اولیه',observed_quantity:'شمارش مستند',received_quantity:'ورودی از شروع',issued_quantity:'خروجی از شروع',opening_quantity:'تعداد پیشنهادی افتتاحیه',reconciliation_status:'وضعیت تطبیق موجودی'});
   cols.opening_bridge=['display_name','evidence_date','reported_toman','observed_tehran','increases_toman','decreases_toman','opening_toman','bridge_status','reference'];
   Object.assign(labels,{reported_toman:'مانده اعلامی (تومان)',observed_tehran:'زمان برداشت تهران',increases_toman:'افزایش مانده (تومان)',decreases_toman:'کاهش مانده (تومان)',opening_toman:'مانده پیشنهادی شروع (تومان)',bridge_status:'وضعیت تطبیق',reference:'مرجع مدرک'});
-  cols.sales_proposals=['local_date','external_id','revision_id','order_status','proposal_status','gross_toman','merchandise_net_toman','discount_toman','shipping_toman','tax_toman','proposal_reasons','proposal_lines','payment_review','cogs_review'];
-  Object.assign(labels,{revision_id:'نسخه مدرک',proposal_status:'وضعیت پیشنهاد',discount_toman:'تخفیف (تومان)',shipping_toman:'ارسال (تومان)',tax_toman:'مالیات (تومان)',proposal_reasons:'موارد نیازمند بررسی',proposal_lines:'ردیف‌های پیشنهادی سند',payment_review:'وضعیت پرداخت',cogs_review:'وضعیت بهای تمام‌شده'});
+  cols.sales_proposals=['local_date','external_id','revision_id','order_status','proposal_status','gross_toman','merchandise_net_toman','discount_toman','shipping_toman','tax_toman','proposal_reasons','proposal_lines','draft_status','draft_ref','payment_review','cogs_review'];
+  Object.assign(labels,{revision_id:'نسخه مدرک',proposal_status:'وضعیت پیشنهاد',draft_status:'وضعیت پیش‌نویس',draft_ref:'مرجع پیش‌نویس',discount_toman:'تخفیف (تومان)',shipping_toman:'ارسال (تومان)',tax_toman:'مالیات (تومان)',proposal_reasons:'موارد نیازمند بررسی',proposal_lines:'ردیف‌های پیشنهادی سند',payment_review:'وضعیت پرداخت',cogs_review:'وضعیت بهای تمام‌شده'});
   cols.settlement_evidence=['settlement_date','gateway_account','bank_account','gateway_ref','bank_ref','gross_toman','net_toman','fee_toman','ledger_basis','settlement_status','journal_ref','evidence_note'];
   Object.assign(labels,{settlement_date:'تاریخ تسویه',gateway_account:'حساب درگاه',bank_account:'حساب بانک',gateway_ref:'مرجع درگاه',bank_ref:'مرجع بانک',gross_toman:'ناخالص (تومان)',net_toman:'واریزی (تومان)',fee_toman:'کارمزد (تومان)',ledger_basis:'مبنای مانده دفتر',settlement_status:'وضعیت بررسی',journal_ref:'مرجع سند پیش‌نویس'});
   cols.woo_reconciliation=['local_date','event_kind','external_id','parent_id','payment_method','order_status','currency','amount_exact'];
@@ -81,6 +81,7 @@ function browserApp(){
   const monetaryFields=['reported_toman','increases_toman','decreases_toman','opening_toman','discount_toman','shipping_toman','tax_toman','gross_toman','net_toman','fee_toman','merchandise_net_toman','reference_cost_toman','indicative_margin_toman','unit_cost_toman','original_cost_toman','amount_toman','value_toman','amount_exact'];
   const reviewModules=['financial_readiness','opening_stock_reconciliation','opening_bridge','opening_costs','opening_balances','opening_valuation'];
   function display(k,v){
+    if(k==='draft_status')return ({draft_candidate:'آماده پیش‌نویس درآمد',draft_created:'پیش‌نویس درآمد ساخته شد',draft_stale:'مدرک تغییر کرده؛ بررسی لازم است',precision_review:'اعشار یا مبلغ خارج از ظرفیت دفتر',review_required:'نیازمند بررسی'})[v]||'—';
     if(k==='reconciliation_status')return ({evidence_required:'مدرک شمارش لازم است',negative_review:'تعداد منفی؛ بررسی شود',zero_reviewed:'صفر مستند',cost_missing:'قیمت خرید لازم است',estimated_reviewed:'موجودی مستند؛ قیمت تخمینی',non_estimated_reviewed:'موجودی و قیمت مرجع مستند'})[v]||'—';
     if(k==='bridge_status')return ({evidence_required:'مدرک گردش لازم است',negative_review:'مانده منفی نیازمند بررسی',bridge_proposed:'مانده پیشنهادی؛ قطعی نیست'})[v]||'—';
     if(k==='settlement_date')return jalali(v);
@@ -286,7 +287,12 @@ function browserApp(){
       }
       if(m==='opening_stock_reconciliation')chartCards.replaceChildren(panel('پوشش تطبیق موجودی','ارزش پیشنهادی فقط برای اقلام دارای شمارش و گردش مستند محاسبه می‌شود.',table(d.counts||[],['reconciliation_status','count','value_toman']),button('Excel جمع تطبیق',()=>excel(d.counts||[],['reconciliation_status','count','value_toman']))));
       if(m==='opening_bridge')chartCards.replaceChildren(panel('پوشش تطبیق افتتاحیه','مانده‌های محاسباتی فقط پس از تطبیق کامل و تأیید حسابداری قابل ثبت هستند.',grid(card('مدارک ثبت‌شده',rows.filter(r=>r.bridge_revision).length,'◫','','ردیف'),card('مدارک باقی‌مانده',rows.filter(r=>!r.bridge_revision).length,'?','','ردیف'))));
-      if(m==='sales_proposals')chartCards.replaceChildren(panel('پیشنهاد خودکار اسناد فروش','سند پیشنهادی فقط درآمد، تخفیف، ارسال، مالیات و حساب دریافتنی را نشان می‌دهد؛ وصول بانک، بهای تاریخی انبار و استردادها جداگانه بررسی می‌شوند. هیچ پیشنهادی به دفتر قطعی ارسال نشده است.'));
+      if(m==='sales_proposals'){
+        const candidates=role==='owner'?shown.filter(r=>r.draft_status==='draft_candidate').map(r=>button('پیش‌نویس درآمد سفارش '+r.external_id,async()=>{
+          try{await operate({kind:'woo_revenue_draft',external_id:r.external_id,revision_id:r.revision_id});await refresh();msg('پیش‌نویس درآمد ذخیره شد؛ بهای تمام‌شده و تأیید پرداخت هنوز لازم است.');}catch(err){msg(err.message,true);}
+        })):[];
+        chartCards.replaceChildren(panel('پیشنهاد خودکار اسناد فروش','پیش‌نویس درآمد فقط درآمد، تخفیف، ارسال، مالیات و حساب دریافتنی را شامل می‌شود؛ بهای تاریخی انبار، وصول بانکی، تطبیق مشتری و استردادها جداگانه بررسی می‌شوند. ثبت قطعی غیرفعال است.',...candidates));
+      }
       if(m==='settlement_evidence'){
         const summaryCols=['gateway_account','count','gross_toman','net_toman','fee_toman'];
         const candidates=role==='owner'?shown.filter(r=>r.settlement_status==='ready_for_draft').map(r=>button('ساخت پیش‌نویس '+r.gateway_ref,async()=>{
