@@ -79,7 +79,7 @@ export async function salesProposalList(pool,url){
     WHERE ((i.item->>'variation_id'='0' AND p.kind='products' AND p.parent_id='' AND p.external_id=i.item->>'product_id' AND q.payload->>'type'='simple')
      OR (i.item->>'variation_id'~'^[1-9][0-9]*$' AND p.kind='variations' AND p.external_id=i.item->>'variation_id' AND p.parent_id=i.item->>'product_id'))
    ) ORDER BY i.ord) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.payload->'line_items')='array' THEN c.payload->'line_items' ELSE '[]'::jsonb END) WITH ORDINALITY i(item,ord)),'[]'::jsonb) identities
- FROM selected c LEFT JOIN woo_revenue_drafts d ON d.external_id=c.external_id LEFT JOIN journals j ON j.id=d.journal_id ORDER BY activity_at DESC,external_id::bigint
+ FROM selected c LEFT JOIN woo_revenue_drafts d ON d.external_id=c.external_id LEFT JOIN journals j ON j.id=d.journal_id ORDER BY c.activity_at DESC,c.external_id::bigint
  `,[start,end,page*100,id]);
  return {rows:rows.map(r=>{
   const proposal=saleProposal(r.payload,{refundExists:r.refund_exists,cutover:r.cutover,stockIdentities:r.identities});
