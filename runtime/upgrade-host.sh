@@ -30,7 +30,9 @@ done
 snapshot=$(mktemp -d "$ROOT/backups/upgrade.XXXXXXXX")
 cp -- "$ROOT/private/.compose.env" "$ROOT/private/.private.env" "$snapshot/"
 compose exec -T postgres pg_dump -U accounting -d vesta_accounting -Fc > "$snapshot/accounting.dump"
-compose exec -T postgres pg_restore -l < "$snapshot/accounting.dump" >/dev/null
+test -s "$snapshot/accounting.dump"
+compose exec -T postgres pg_restore --exit-on-error --file=/dev/null < "$snapshot/accounting.dump"
+(cd "$snapshot" && sha256sum accounting.dump > SHA256SUMS && sha256sum -c SHA256SUMS)
 rollback() {
   cp -- "$snapshot/.compose.env" "$ROOT/private/.compose.env"
   cp -- "$snapshot/.private.env" "$ROOT/private/.private.env"

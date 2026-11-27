@@ -1,3 +1,4 @@
+import {correctPurchaseCost,openingReviewModules,reviewOpeningInput} from './opening-review.mjs';
 import {createHash,createHmac,timingSafeEqual,randomUUID} from 'node:crypto';
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const kinds=['products','variations','orders','customers','refunds','coupons','categories'];
@@ -39,6 +40,7 @@ export class WooSource{
 export function verifyWebhook(secret,payload,signature){if(!secret||typeof signature!=='string')return false;try{const a=createHmac('sha256',secret).update(payload).digest(),b=Buffer.from(signature,'base64');return a.length===b.length&&timingSafeEqual(a,b);}catch{return false;}}
 export async function acceptWebhook(pool,{secret,payload,signature,topic,deliveryId}){if(!verifyWebhook(secret,payload,signature))return false;const body=JSON.parse(payload.toString('utf8'));if(!Number.isSafeInteger(body.id)||body.id<=0||typeof topic!=='string'||topic.length>100||!deliveryId||deliveryId.length>150)return false;const fp=hash(payload),key=topic+':'+deliveryId;await pool.query('INSERT INTO sync_events(event_key,topic,fingerprint,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[key,topic,fp,String(body.id)]);const existing=(await pool.query('SELECT fingerprint FROM sync_events WHERE event_key=$1',[key])).rows[0];if(existing.fingerprint!==fp){await pool.query("UPDATE sync_events SET status='review' WHERE event_key=$1",[key]);return false;}await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return true;}
 export function sourceService(pool){return {
+ correctPurchaseCost(input,actor){return correctPurchaseCost(pool,input,actor);},
  async detail(kind,id,parent){if(!['orders','refunds'].includes(kind)||!/^\d{1,20}$/.test(id||'')||!(kind==='refunds'?/^\d{1,20}$/.test(parent||''):!parent))return null;
    const row=(await pool.query('SELECT r.payload FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id WHERE c.kind=$1 AND c.external_id=$2 AND c.parent_id=$3',[kind,id,parent||''])).rows[0]?.payload;
    if(!row)return null;const record=pick(row,['id','number','date_created_gmt','date_paid_gmt','date_completed_gmt','status','currency','customer_id','total','total_tax','discount_total','shipping_total','payment_method','payment_method_title','transaction_id','amount']);
@@ -52,7 +54,8 @@ export function sourceService(pool){return {
  const opening={phase:capture?'frozen_unverified':'live_preview',cutover_at:cutover?.effective_at_utc||null,observed_at:capture?.observed_at||null,source_full_sync_at:capture?.last_full_sync_at||null,verification_status:capture?.verification_status||'not_captured',...Object.fromEntries(Object.entries(o).map(([k,v])=>[k,Number(v)]))};
  return {cutover,opening,products:counts.products||0,variations:counts.variations||0,orders:counts.orders||0,customers:counts.customers||0,refunds:counts.refunds||0,coupons:counts.coupons||0,categories:counts.categories||0,last_success:s.last_success,pending:Number(e.pending),failed:Number(e.failed)+Number(progress.failed),last_error:s.last_error,complete:Number(progress.complete)===kinds.length,initial_complete:Boolean(s.last_success),refresh_in_progress:Boolean(s.last_success)&&Number(progress.complete)!==kinds.length};},
  async retry(){await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return {queued:true};},
- async list(module,url){if(module==='opening_review'){
+ async list(module,url){if(openingReviewModules.includes(module))return reviewOpeningInput(pool,module,url);
+  if(module==='opening_review'){
    const capture=(await pool.query('SELECT observed_at,last_full_sync_at,verification_status FROM opening_capture WHERE id=1')).rows[0]||null;
    const p=Math.max(0,Math.min(100000,Math.trunc(Number(url.searchParams.get('page')||0)||0)));
    const rows=(await pool.query('SELECT source_kind,external_id,parent_id,name,sku,stock_quantity,stock_status,manage_stock,price,currency,source_checked_at FROM '+(capture?'opening_capture_items':'opening_live_review')+' ORDER BY source_kind,external_id::bigint LIMIT 100 OFFSET $1',[p*100])).rows;
