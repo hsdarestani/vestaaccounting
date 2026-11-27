@@ -104,6 +104,34 @@ try{
  assert.equal(bridge.rows.find(r=>r.event_kind==='order_paid').amount_exact,'123.4');
  assert.equal(bridge.rows.find(r=>r.event_kind==='refund_created').amount_exact,'5.5');
  assert.equal(bridge.rows.find(r=>r.event_kind==='order_paid').local_date,'2026-11-24');
+ // Indicative margin covers only fully identified, refund-free paid orders.
+ await persistPage(pool,'products',[{id:12,type:'simple',name:'Synthetic simple',sku:'SYN-12'}]);
+ await pool.query("INSERT INTO opening_input_costs_v1(external_id,unit_cost_toman,cost_status,priority_review,source_kind) VALUES(12,20,'estimate',true,'products')");
+ const paidBase={currency:'IRT',status:'completed',date_paid_gmt:'2026-11-24T10:00:00',refunds:[]};
+ await persistPage(pool,'orders',[
+  {...paidBase,id:570,currency:'IRR',line_items:[{product_id:10,variation_id:11,quantity:2,total:'1005'}]},
+  {...paidBase,id:571,line_items:[{product_id:12,variation_id:0,quantity:2,total:'70.25'}]},
+  {...paidBase,id:572,line_items:[{product_id:999,variation_id:0,quantity:1,total:'90'}]},
+  {...paidBase,id:573,refunds:[{id:574}],line_items:[{product_id:12,variation_id:0,quantity:1,total:'45'}]},
+  {...paidBase,id:575,line_items:[{product_id:999,variation_id:11,quantity:1,total:'45'}]},
+  {...paidBase,id:576,status:'cancelled',line_items:[{product_id:12,variation_id:0,quantity:1,total:'45'}]},
+  {...paidBase,id:577,line_items:[{product_id:12,variation_id:0,quantity:1,total:'45'}]}
+ ]);
+ await persistPage(pool,'refunds',[{id:578,amount:'10',date_created_gmt:'2026-11-26T11:20:00'}],'577');
+ const postedBeforeMargin=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
+ const [margin]=await request('/api/data/woo_reconciliation');
+ const day=margin.margin_review.filter(r=>r.local_date==='2026-11-24');
+ const byStatus=Object.fromEntries(day.map(r=>[r.margin_status,r]));
+ assert.equal(byStatus.non_estimated_reference.merchandise_net_toman,'100.5');
+ assert.equal(byStatus.non_estimated_reference.reference_cost_toman,'66');
+ assert.equal(byStatus.non_estimated_reference.indicative_margin_toman,'34.5');
+ assert.equal(byStatus.estimated_reference.indicative_margin_toman,'30.25');
+ assert.equal(byStatus.line_or_cost_review.count,2);
+ assert.equal(byStatus.line_or_cost_review.indicative_margin_toman,null);
+ assert.equal(byStatus.refund_review.count,2);
+ assert.equal(byStatus.status_review.count,1);
+ assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeMargin);
+
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
