@@ -29,4 +29,28 @@ jobs:
           if [ "$disk" -ge 15000 ]; then echo disk_gate=pass; else echo disk_gate=fail; fi
           if docker ps -aq --filter label=com.docker.compose.project=vesta-accounting-source | grep -q .; then echo accounting_containers_exist=yes; else echo accounting_containers_exist=no; fi
           if test -f /srv/vesta-accounting/private/installed; then echo installation_marker=present; else echo installation_marker=absent; fi
+          printf 'available_ram_mib=%s\n' "$ram"
+          printf 'available_accounting_disk_mib=%s\n' "$disk"
+          docker_root=$(docker info --format '{{.DockerRootDir}}')
+          printf 'available_docker_disk_mib=%s\n' "$(df -Pm "$docker_root" | awk 'NR==2{print $4}')"
+          if [ "$ram" -ge 2200 ] && [ "$disk" -ge 11776 ] && [ "$(df -Pm "$docker_root" | awk 'NR==2{print $4}')" -ge 11776 ]; then echo upgrade_capacity_gate=pass; else echo upgrade_capacity_gate=fail; fi
+          docker image ls vesta-accounting --format 'accounting_image={{.Tag}} size={{.Size}}'
+          docker image ls vesta-accounting -q | sort -u | wc -l | awk '{print "accounting_image_ids=" $1}'
+          for name in release.tar.gz image.tar.gz; do
+            file="/srv/vesta-accounting/$name"
+            if test -f "$file" && test ! -L "$file"; then du -m -- "$file" | awk -v name="$name" '{print "temporary_archive=" name " mib=" $1}'; fi
+          done
+          cd /srv/vesta-accounting/release/runtime
+          docker compose --env-file /srv/vesta-accounting/private/.compose.env -f compose.yml exec -T postgres psql -X -A -t -U accounting -d vesta_accounting -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN READ ONLY;
+          SELECT 'source_activity kind='||c.kind||' day='||((r.payload->>'date_created_gmt')::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tehran')::date||' count='||count(*)
+          FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id
+          WHERE c.kind IN ('orders','refunds') AND (r.payload->>'date_created_gmt')>='2026-11-23T20:30:00'
+           AND (r.payload->>'date_created_gmt')<'2026-11-26T20:30:00'
+          GROUP BY c.kind,((r.payload->>'date_created_gmt')::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tehran')::date ORDER BY 1;
+          SELECT 'opening_costs='||count(*) FROM opening_input_costs_v1;
+          SELECT 'opening_evidence_rows='||count(*) FROM opening_input_balances_v1;
+          SELECT 'financial_documents='||count(*) FROM documents;
+          COMMIT;
+          SQL
           REMOTE
