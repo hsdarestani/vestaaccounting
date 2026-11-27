@@ -1,3 +1,4 @@
+import {expenseEvidenceList,recordExpenseEvidence,draftExpense} from './operating-expense-evidence.mjs';
 import {inventoryCostList,recordInventoryCost} from './inventory-cost-evidence.mjs';
 import {financialReadiness} from './financial-readiness.mjs';
 import {stockReconciliationList,recordStockReconciliation} from './opening-stock-reconciliation.mjs';
@@ -48,6 +49,8 @@ export function verifyWebhook(secret,payload,signature){if(!secret||typeof signa
 export async function acceptWebhook(pool,{secret,payload,signature,topic,deliveryId}){if(!verifyWebhook(secret,payload,signature))return false;const body=JSON.parse(payload.toString('utf8'));if(!Number.isSafeInteger(body.id)||body.id<=0||typeof topic!=='string'||topic.length>100||!deliveryId||deliveryId.length>150)return false;const fp=hash(payload),key=topic+':'+deliveryId;await pool.query('INSERT INTO sync_events(event_key,topic,fingerprint,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[key,topic,fp,String(body.id)]);const existing=(await pool.query('SELECT fingerprint FROM sync_events WHERE event_key=$1',[key])).rows[0];if(existing.fingerprint!==fp){await pool.query("UPDATE sync_events SET status='review' WHERE event_key=$1",[key]);return false;}await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return true;}
 export function sourceService(pool){return {
  createRevenueDraft(input,actor){return createRevenueDraft(pool,input,actor);},
+ recordExpenseEvidence(input,actor){return recordExpenseEvidence(pool,input,actor);},
+ draftExpense(input,actor){return draftExpense(pool,input,actor);},
  recordInventoryCost(input,actor){return recordInventoryCost(pool,input,actor);},
  recordStockReconciliation(input,actor){return recordStockReconciliation(pool,input,actor);},
  recordOpeningBridge(input,actor){return recordOpeningBridge(pool,input,actor);},
@@ -67,7 +70,7 @@ export function sourceService(pool){return {
  const opening={phase:capture?'frozen_unverified':'live_preview',cutover_at:cutover?.effective_at_utc||null,observed_at:capture?.observed_at||null,source_full_sync_at:capture?.last_full_sync_at||null,verification_status:capture?.verification_status||'not_captured',...Object.fromEntries(Object.entries(o).map(([k,v])=>[k,Number(v)]))};
  return {cutover,opening,products:counts.products||0,variations:counts.variations||0,orders:counts.orders||0,customers:counts.customers||0,refunds:counts.refunds||0,coupons:counts.coupons||0,categories:counts.categories||0,last_success:s.last_success,pending:Number(e.pending),failed:Number(e.failed)+Number(progress.failed),last_error:s.last_error,complete:Number(progress.complete)===kinds.length,initial_complete:Boolean(s.last_success),refresh_in_progress:Boolean(s.last_success)&&Number(progress.complete)!==kinds.length};},
  async retry(){await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return {queued:true};},
- async list(module,url){if(module==='inventory_cost_evidence')return inventoryCostList(pool,url);if(module==='financial_readiness')return financialReadiness(pool);if(module==='opening_stock_reconciliation')return stockReconciliationList(pool,url);if(module==='opening_bridge')return openingBridgeList(pool);if(module==='sales_proposals')return salesProposalList(pool,url);if(module==='settlement_evidence')return settlementList(pool,url);if(module==='woo_reconciliation')return wooReconciliation(pool,url);
+ async list(module,url){if(module==='expense_evidence')return expenseEvidenceList(pool,url);if(module==='inventory_cost_evidence')return inventoryCostList(pool,url);if(module==='financial_readiness')return financialReadiness(pool);if(module==='opening_stock_reconciliation')return stockReconciliationList(pool,url);if(module==='opening_bridge')return openingBridgeList(pool);if(module==='sales_proposals')return salesProposalList(pool,url);if(module==='settlement_evidence')return settlementList(pool,url);if(module==='woo_reconciliation')return wooReconciliation(pool,url);
   if(openingReviewModules.includes(module))return reviewOpeningInput(pool,module,url);
   if(module==='opening_review'){
    const capture=(await pool.query('SELECT observed_at,last_full_sync_at,verification_status FROM opening_capture WHERE id=1')).rows[0]||null;

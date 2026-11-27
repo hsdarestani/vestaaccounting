@@ -26,6 +26,8 @@ try{
  await pool.query(revenueMigration);
  const costMigration=await readFile(new URL('009_inventory_cost_evidence.sql',import.meta.url),'utf8');
  await pool.query(costMigration);
+ const expenseMigration=await readFile(new URL('010_operating_expense_evidence.sql',import.meta.url),'utf8');
+ await pool.query(expenseMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -174,6 +176,34 @@ try{
  assert.deepEqual((await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[netDraft.id])).rows,[{account:'1012',debit:100,credit:0},{account:'1310',debit:0,credit:100}]);
  const [unknownEvidence]=await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-UNKNOWN',bank_ref:'SYN-BANK-UNKNOWN',ledger_basis:'unknown'},201);
  await request('/api/operate','POST',{kind:'settlement_draft',id:unknownEvidence.id},409);
+ // Operating expenses are independent of inventory and provider fees.
+ await pool.query("INSERT INTO parties(id,kind,name,ref) VALUES('expense-ci-supplier','supplier','Synthetic expense supplier','EXPENSE-CI-SUPPLIER')");
+ const expense={kind:'expense_evidence',expense_date:'2026-11-25',expense_account:'5040',funding_account:'1012',invoice_ref:'EXPENSE-CI-1',payment_ref:'EXPENSE-BANK-1',amount_toman:'125',description:'Synthetic operating expense'};
+ await request('/api/operate','POST',{...expense,expense_account:'5020'},400);
+ await request('/api/operate','POST',{...expense,payment_ref:'SYN-BANK-1'},409);
+ const [paidExpense]=await request('/api/operate','POST',expense,201);
+ const [duplicateExpense]=await request('/api/operate','POST',expense,201);
+ assert.equal(duplicateExpense.id,paidExpense.id);assert.equal(duplicateExpense.duplicate,true);
+ await request('/api/operate','POST',{...expense,amount_toman:'126'},409);
+ await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-EXPENSE',bank_ref:'EXPENSE-BANK-1'},409);
+ const [accruedExpense]=await request('/api/operate','POST',{...expense,expense_account:'5090',funding_account:'2010',supplier_id:'expense-ci-supplier',invoice_ref:'EXPENSE-CI-2',payment_ref:'',amount_toman:'45'},201);
+ const [fractionalExpense]=await request('/api/operate','POST',{...expense,invoice_ref:'EXPENSE-CI-3',payment_ref:'EXPENSE-BANK-3',amount_toman:'5.75'},201);
+ await request('/api/operate','POST',{kind:'expense_draft',id:fractionalExpense.id},409);
+ const beforeExpensePosting=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
+ const [paidDraft]=await request('/api/operate','POST',{kind:'expense_draft',id:paidExpense.id},201);
+ const [paidDraftRepeat]=await request('/api/operate','POST',{kind:'expense_draft',id:paidExpense.id},201);
+ assert.equal(paidDraftRepeat.id,paidDraft.id);
+ assert.deepEqual((await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[paidDraft.id])).rows,[{account:'1012',debit:0,credit:125},{account:'5040',debit:125,credit:0}]);
+ const [accruedDraft]=await request('/api/operate','POST',{kind:'expense_draft',id:accruedExpense.id},201);
+ assert.deepEqual((await pool.query('SELECT account,detail,debit,credit FROM lines WHERE journal=$1 AND account=$2',[accruedDraft.id,'2010'])).rows,[{account:'2010',detail:'expense-ci-supplier',debit:0,credit:45}]);
+ const [expenses]=await request('/api/data/expense_evidence?start=2026-11-25&end=2026-11-25');
+ assert.equal(expenses.rows.length,3);assert.equal(expenses.posting_authorized,false);
+ assert.equal(expenses.rows.find(r=>r.id===paidExpense.id).expense_status,'draft_created');
+ assert.equal(expenses.rows.find(r=>r.id===fractionalExpense.id).amount_toman,'5.75');
+ assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,beforeExpensePosting);
+ await assert.rejects(pool.query("UPDATE operating_expense_evidence SET amount_toman=0 WHERE id=$1",[paidExpense.id]),/immutable record/);
+ await pool.query(expenseMigration);
+
 
  
  // Completed Woo sales yield balanced revenue proposals, not cash receipts or posted documents.
