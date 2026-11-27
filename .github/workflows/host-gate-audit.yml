@@ -5,6 +5,9 @@ on:
     paths: [".github/workflows/host-gate-audit.yml"]
 permissions:
   contents: read
+concurrency:
+  group: vesta-accounting-host
+  cancel-in-progress: false
 jobs:
   audit:
     runs-on: ubuntu-latest
@@ -55,6 +58,22 @@ jobs:
           SELECT 'opening_costs='||count(*) FROM opening_input_costs_v1;
           SELECT 'opening_evidence_rows='||count(*) FROM opening_input_balances_v1;
           SELECT 'financial_documents='||count(*) FROM documents;
+          SELECT 'opening_migration='||count(*) FROM migrations WHERE version='004';
+          SELECT 'journal_states draft='||count(*) FILTER(WHERE status='draft')||
+           ' approved='||count(*) FILTER(WHERE status='approved')||
+           ' posted='||count(*) FILTER(WHERE status='posted') FROM journals;
+          SELECT 'posted_trial_is_balanced='||(coalesce(sum(l.debit::numeric),0)=coalesce(sum(l.credit::numeric),0))
+           FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted';
+          SELECT 'linked_opening_accounts='||count(DISTINCT account)||' evidence_links='||count(*)||
+           ' supplier_links='||count(DISTINCT party) FROM opening_balance_account_links;
+          SELECT 'gateway_rules='||count(*) FROM opening_gateway_rules;
+          SELECT 'stock_evidence status='||review_status||' count='||count(*) FROM opening_stock_cost_review
+           GROUP BY review_status ORDER BY review_status;
+          SELECT 'unresolved_opening_exceptions='||count(*) FROM exceptions
+           WHERE kind='opening_reconciliation' AND status='review';
+          SELECT 'source_sync_failures='||count(*) FILTER(WHERE status='failed')||
+           ' source_sync_complete='||count(*) FILTER(WHERE status='complete') FROM sync_state;
+          SELECT 'source_counts kind='||kind||' rows='||count(*) FROM raw_current GROUP BY kind ORDER BY kind;
           COMMIT;
           SQL
           REMOTE
