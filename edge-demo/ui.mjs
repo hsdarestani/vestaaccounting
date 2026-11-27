@@ -58,8 +58,8 @@ function browserApp(){
   cols.cashflow=['kind','debit','credit','balance'];cols.balance_sheet=['code','title','balance'];kindFa.manual='اسناد دستی / طبقه‌بندی نشده';
   cols.opening_review=['source_kind','external_id','parent_id','name','display_sku','stock_quantity','stock_status','price','currency','issues','source_checked_at'];Object.assign(labels,{source_kind:'نوع منبع',display_sku:'SKU واقعی / شناسه موقت',stock_status:'وضعیت موجودی',issues:'موارد نیازمند بررسی',source_checked_at:'آخرین مشاهده منبع',stock_quantity:'تعداد منبع'});
   cols.source_products=['external_id','name','sku','type','price','currency','stock_quantity','modified'];cols.source_variations=['external_id','parent_id','name','sku','price','currency','stock_quantity','modified'];cols.source_orders=['external_id','customer_id','order_status','total','currency','payment_method','discount_total','shipping_total','total_tax','modified'];cols.source_customers=['external_id','modified'];cols.source_refunds=['external_id','parent_id','total','currency','modified'];cols.source_coupons=['external_id','name','discount_type','amount','modified'];Object.assign(labels,{external_id:'شناسه ووکامرس',parent_id:'محصول / سفارش مادر',type:'نوع',price:'قیمت منبع (بدون تبدیل)',currency:'ارز منبع',stock_quantity:'موجودی منبع',modified:'آخرین تغییر منبع',customer_id:'شناسه مشتری',order_status:'وضعیت سفارش',payment_method:'روش پرداخت',discount_total:'تخفیف منبع',shipping_total:'ارسال منبع',total_tax:'مالیات منبع',discount_type:'نوع تخفیف',amount:'مقدار منبع'});
-  cols.settlement_evidence=['settlement_date','gateway_account','bank_account','gateway_ref','bank_ref','gross_toman','net_toman','fee_toman','settlement_status','journal_ref','evidence_note'];
-  Object.assign(labels,{settlement_date:'تاریخ تسویه',gateway_account:'حساب درگاه',bank_account:'حساب بانک',gateway_ref:'مرجع درگاه',bank_ref:'مرجع بانک',gross_toman:'ناخالص (تومان)',net_toman:'واریزی (تومان)',fee_toman:'کارمزد (تومان)',settlement_status:'وضعیت بررسی',journal_ref:'مرجع سند پیش‌نویس'});
+  cols.settlement_evidence=['settlement_date','gateway_account','bank_account','gateway_ref','bank_ref','gross_toman','net_toman','fee_toman','ledger_basis','settlement_status','journal_ref','evidence_note'];
+  Object.assign(labels,{settlement_date:'تاریخ تسویه',gateway_account:'حساب درگاه',bank_account:'حساب بانک',gateway_ref:'مرجع درگاه',bank_ref:'مرجع بانک',gross_toman:'ناخالص (تومان)',net_toman:'واریزی (تومان)',fee_toman:'کارمزد (تومان)',ledger_basis:'مبنای مانده دفتر',settlement_status:'وضعیت بررسی',journal_ref:'مرجع سند پیش‌نویس'});
   cols.woo_reconciliation=['local_date','event_kind','external_id','parent_id','payment_method','order_status','currency','amount_exact'];
   cols.opening_costs=['external_id','source_kind','parent_id','name','identities','unit_cost_toman','cost_status','original_cost_toman','original_status','priority_review','corrected_at'];
   cols.opening_balances=['evidence_date','display_name','account','amount_toman','fee_basis','evidence_note'];
@@ -74,7 +74,8 @@ function browserApp(){
   const reviewModules=['opening_costs','opening_balances','opening_valuation'];
   function display(k,v){
     if(k==='settlement_date')return jalali(v);
-    if(k==='settlement_status')return ({draft_created:'پیش‌نویس ساخته شد',fractional_review:'نیاز به بررسی اعشار',period_required:'دوره مالی لازم است',ready_for_draft:'آماده پیش‌نویس'})[v]||'—';
+    if(k==='ledger_basis')return ({unknown:'تأیید نشده',gross_unexpensed:'ناخالص؛ کارمزد ثبت نشده',net_already_expensed:'خالص؛ کارمزد قبلاً منظور شده'})[v]||'—';
+    if(k==='settlement_status')return ({basis_review:'مبنای مانده نیازمند تأیید',draft_created:'پیش‌نویس ساخته شد',fractional_review:'نیاز به بررسی اعشار',period_required:'دوره مالی لازم است',ready_for_draft:'آماده پیش‌نویس'})[v]||'—';
     if(['gateway_account','bank_account'].includes(k))return opts.accounts.find(a=>a.code===v)?.title||v;
     if(monetaryFields.includes(k))return fmt(v);
     if(['source_kind','review_status','cost_status','original_status','fee_basis','event_kind'].includes(k))return reviewLabels[v]||'—';
@@ -214,6 +215,7 @@ function browserApp(){
         {k:'gross_toman',t:'مبلغ ناخالص تومان',type:'text'},
         {k:'net_toman',t:'مبلغ واریزی تومان',type:'text'},
         {k:'fee_toman',t:'کارمزد مستند تومان',type:'text'},
+        {k:'ledger_basis',t:'مبنای مانده در دفتر',type:'select',choices:[['unknown','تأیید نشده'],['gross_unexpensed','ناخالص؛ کارمزد قبلاً ثبت نشده'],['net_already_expensed','خالص؛ کارمزد قبلاً منظور شده']]},
         {k:'evidence_note',t:'مرجع یا توضیح مستندات هر دو طرف',type:'text'}
       ];
       const digit=v=>v.replace(/[۰-۹]/g,x=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(x))).replace(/[٠-٩]/g,x=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(x))).replace(/٫/g,'.');
