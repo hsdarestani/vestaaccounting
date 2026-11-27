@@ -1,0 +1,45 @@
+name: Stage reviewed Vesta opening evidence
+on:
+  push:
+    branches: ['ops/stage-opening-inputs-20261127']
+    paths: ['.github/workflows/stage-opening-inputs.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vesta-accounting-host
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: github.repository == 'hsdarestani/vestaaccounting' && github.ref == 'refs/heads/ops/stage-opening-inputs-20261127'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 3}
+      - name: Generate reviewed opening evidence
+        run: |
+          umask 077
+          bash -n runtime/stage-opening-production.sh
+          git diff --exit-code 2f21bb14acd36397c6b80974f198dbf9f7104f84 HEAD -- runtime/stage-opening-inputs-20261127.py
+          python3 runtime/stage-opening-inputs-20261127.py > "$RUNNER_TEMP/opening-inputs.sql"
+      - name: Verify backup, import evidence and read back aggregate results
+        env:
+          SERVERIP: ${{ secrets.SERVERIP }}
+          ROOTPASS: ${{ secrets.ROOTPASS }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test -n "$SERVERIP" && test -n "$ROOTPASS"
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 8 -t ed25519 "$SERVERIP" > "$RUNNER_TEMP/accounting_known" 2>/dev/null
+          fingerprint=$(ssh-keygen -lf "$RUNNER_TEMP/accounting_known" -E sha256 | awk 'NR==1{print $2}')
+          test "$fingerprint" = 'SHA256:KevhknUxbSfri8TfKLxb8XMgG+vxtrRp/zHyRGWLc0k'
+          export SSHPASS="$ROOTPASS"
+          args=(-o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/accounting_known" -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+          target="root@$SERVERIP"
+          remote_script=$(sshpass -e ssh "${args[@]}" "$target" 'mktemp /srv/vesta-accounting/private/run-opening-inputs.XXXXXXXX')
+          [[ "$remote_script" =~ ^/srv/vesta-accounting/private/run-opening-inputs\.[a-zA-Z0-9]+$ ]]
+          trap 'sshpass -e ssh "${args[@]}" "$target" "rm -f -- $remote_script"' EXIT
+          sshpass -e scp "${args[@]}" runtime/stage-opening-production.sh "$target:$remote_script"
+          sshpass -e ssh "${args[@]}" "$target" "bash $remote_script" < "$RUNNER_TEMP/opening-inputs.sql"
