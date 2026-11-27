@@ -1,3 +1,4 @@
+import {paidMarginReview} from './paid-margin-review.mjs';
 // WooCommerce indicates order and refund activity. Bank receipt, provider fees,
 // physical returns and accounting approval require their own evidence.
 export async function wooReconciliation(pool,url){
@@ -5,7 +6,7 @@ export async function wooReconciliation(pool,url){
  const end=url.searchParams.get('end')||'2026-11-26';
  const page=Math.max(0,Math.min(1000,Math.trunc(Number(url.searchParams.get('page'))||0)));
  const dateValid=value=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(value+'T00:00:00Z').toJSON()?.slice(0,10)===value;
- if(!dateValid(start)||!dateValid(end)||start>end)return {rows:[],summary:[],start,end};
+ if(!dateValid(start)||!dateValid(end)||start>end)return {rows:[],summary:[],margin_review:[],start,end};
  const result=(await pool.query(`
   WITH bounds AS (
    SELECT to_char(greatest($1::date::timestamp AT TIME ZONE 'Asia/Tehran',effective_at_utc)
@@ -54,5 +55,5 @@ export async function wooReconciliation(pool,url){
    'rows',coalesce((SELECT jsonb_agg(to_jsonb(display)-'amount_toman') FROM display),'[]'::jsonb),
    'summary',coalesce((SELECT jsonb_agg(to_jsonb(summary)) FROM summary),'[]'::jsonb)
   ) AS result`,[start,end,page*100])).rows[0].result;
- return {...result,start,end};
+ return {...result,margin_review:await paidMarginReview(pool,start,end),start,end};
 }
