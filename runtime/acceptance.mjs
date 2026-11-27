@@ -18,6 +18,8 @@ try{
  await pool.query(openingMigration);
  const settlementMigration=await readFile(new URL('005_gateway_settlement_evidence.sql',import.meta.url),'utf8');
  await pool.query(settlementMigration);
+ const bridgeMigration=await readFile(new URL('006_opening_balance_bridge.sql',import.meta.url),'utf8');
+ await pool.query(bridgeMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -182,6 +184,21 @@ try{
  assert.equal(proposalResult.rows.find(r=>r.external_id==='584').reasons.includes('refund_review'),true);
  assert.equal(proposalResult.rows.find(r=>r.external_id==='585').reasons.includes('identity_review'),true);
  assert.equal((await pool.query('SELECT count(*) n FROM journals')).rows[0].n,journalCountBeforeProposal);
+  
+ const openingBridge={kind:'opening_bridge',line_key:'bank-7640',evidence_date:'2026-11-26',observed_time:'10:30',increases_toman:'30.10',decreases_toman:'5.05',reference:'Synthetic complete statements',coverage_confirmed:true};
+ await request('/api/operate','POST',{...openingBridge,coverage_confirmed:false},400);
+ const [bridgeSaved]=await request('/api/operate','POST',openingBridge,201);
+ const [bridgeRepeat]=await request('/api/operate','POST',openingBridge,201);
+ assert.equal(bridgeRepeat.revision,bridgeSaved.revision);assert.equal(bridgeRepeat.duplicate,true);
+ const [bridgeRows]=await request('/api/data/opening_bridge');
+ const bridgeRow=bridgeRows.rows.find(r=>r.line_key==='bank-7640');
+ assert.equal(bridgeRow.opening_toman,'98.40');assert.equal(bridgeRow.bridge_status,'bridge_proposed');assert.equal(bridgeRows.posting_authorized,false);
+ await assert.rejects(pool.query('UPDATE opening_balance_bridge_evidence SET increases_toman=0 WHERE id=$1',[bridgeSaved.revision]),/immutable record/);
+ const [negativeBridge]=await request('/api/operate','POST',{...openingBridge,increases_toman:'200',reference:'Synthetic revised statement'},201);
+ assert.notEqual(negativeBridge.revision,bridgeSaved.revision);
+ const [updatedBridge]=await request('/api/data/opening_bridge');
+ assert.equal(updatedBridge.rows.find(r=>r.line_key==='bank-7640').bridge_status,'negative_review');
+ await pool.query(bridgeMigration);
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');

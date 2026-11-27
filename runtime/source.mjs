@@ -1,3 +1,4 @@
+import {openingBridgeList,recordOpeningBridge} from './opening-balance-bridge.mjs';
 import {salesProposalList} from './woo-sale-proposals.mjs';
 import {settlementList,recordSettlement,draftSettlement} from './gateway-settlement-evidence.mjs';
 import {wooReconciliation} from './woo-reconciliation.mjs';
@@ -43,6 +44,7 @@ export class WooSource{
 export function verifyWebhook(secret,payload,signature){if(!secret||typeof signature!=='string')return false;try{const a=createHmac('sha256',secret).update(payload).digest(),b=Buffer.from(signature,'base64');return a.length===b.length&&timingSafeEqual(a,b);}catch{return false;}}
 export async function acceptWebhook(pool,{secret,payload,signature,topic,deliveryId}){if(!verifyWebhook(secret,payload,signature))return false;const body=JSON.parse(payload.toString('utf8'));if(!Number.isSafeInteger(body.id)||body.id<=0||typeof topic!=='string'||topic.length>100||!deliveryId||deliveryId.length>150)return false;const fp=hash(payload),key=topic+':'+deliveryId;await pool.query('INSERT INTO sync_events(event_key,topic,fingerprint,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[key,topic,fp,String(body.id)]);const existing=(await pool.query('SELECT fingerprint FROM sync_events WHERE event_key=$1',[key])).rows[0];if(existing.fingerprint!==fp){await pool.query("UPDATE sync_events SET status='review' WHERE event_key=$1",[key]);return false;}await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return true;}
 export function sourceService(pool){return {
+ recordOpeningBridge(input,actor){return recordOpeningBridge(pool,input,actor);},
  recordSettlement(input,actor){return recordSettlement(pool,input,actor);},
  draftSettlement(input,actor){return draftSettlement(pool,input,actor);},
  correctPurchaseCost(input,actor){return correctPurchaseCost(pool,input,actor);},
@@ -59,7 +61,7 @@ export function sourceService(pool){return {
  const opening={phase:capture?'frozen_unverified':'live_preview',cutover_at:cutover?.effective_at_utc||null,observed_at:capture?.observed_at||null,source_full_sync_at:capture?.last_full_sync_at||null,verification_status:capture?.verification_status||'not_captured',...Object.fromEntries(Object.entries(o).map(([k,v])=>[k,Number(v)]))};
  return {cutover,opening,products:counts.products||0,variations:counts.variations||0,orders:counts.orders||0,customers:counts.customers||0,refunds:counts.refunds||0,coupons:counts.coupons||0,categories:counts.categories||0,last_success:s.last_success,pending:Number(e.pending),failed:Number(e.failed)+Number(progress.failed),last_error:s.last_error,complete:Number(progress.complete)===kinds.length,initial_complete:Boolean(s.last_success),refresh_in_progress:Boolean(s.last_success)&&Number(progress.complete)!==kinds.length};},
  async retry(){await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return {queued:true};},
- async list(module,url){if(module==='sales_proposals')return salesProposalList(pool,url);if(module==='settlement_evidence')return settlementList(pool,url);if(module==='woo_reconciliation')return wooReconciliation(pool,url);
+ async list(module,url){if(module==='opening_bridge')return openingBridgeList(pool);if(module==='sales_proposals')return salesProposalList(pool,url);if(module==='settlement_evidence')return settlementList(pool,url);if(module==='woo_reconciliation')return wooReconciliation(pool,url);
   if(openingReviewModules.includes(module))return reviewOpeningInput(pool,module,url);
   if(module==='opening_review'){
    const capture=(await pool.query('SELECT observed_at,last_full_sync_at,verification_status FROM opening_capture WHERE id=1')).rows[0]||null;
