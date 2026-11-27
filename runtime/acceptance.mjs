@@ -20,6 +20,8 @@ try{
  await pool.query(settlementMigration);
  const bridgeMigration=await readFile(new URL('006_opening_balance_bridge.sql',import.meta.url),'utf8');
  await pool.query(bridgeMigration);
+ const stockMigration=await readFile(new URL('007_opening_stock_reconciliation.sql',import.meta.url),'utf8');
+ await pool.query(stockMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -199,6 +201,21 @@ try{
  const [updatedBridge]=await request('/api/data/opening_bridge');
  assert.equal(updatedBridge.rows.find(r=>r.line_key==='bank-7640').bridge_status,'negative_review');
  await pool.query(bridgeMigration);
+ 
+ const stockEvidence={kind:'opening_stock_reconciliation',source_kind:'variations',external_id:'11',parent_id:'10',observed_tehran:'2026-11-26T10:30',observed_quantity:7,received_quantity:3,issued_quantity:2,reference:'Synthetic physical count and complete movement log',coverage_confirmed:true};
+ await request('/api/operate','POST',{...stockEvidence,coverage_confirmed:false},400);
+ const [stockSaved]=await request('/api/operate','POST',stockEvidence,201);
+ const [stockRepeat]=await request('/api/operate','POST',stockEvidence,201);
+ assert.equal(stockRepeat.revision,stockSaved.revision);assert.equal(stockRepeat.duplicate,true);
+ await request('/api/operate','POST',{...stockEvidence,parent_id:'999'},404);
+ const [stockReview]=await request('/api/data/opening_stock_reconciliation?id=11');
+ assert.equal(stockReview.rows[0].opening_quantity,6);assert.equal(stockReview.rows[0].value_toman,'198');assert.equal(stockReview.posting_authorized,false);
+ await assert.rejects(pool.query('UPDATE opening_stock_reconciliation SET observed_quantity=0 WHERE id=$1',[stockSaved.revision]),/immutable record/);
+ const [negativeStock]=await request('/api/operate','POST',{...stockEvidence,received_quantity:20,reference:'Synthetic revised movements'},201);
+ assert.notEqual(negativeStock.revision,stockSaved.revision);
+ const [stockIssues]=await request('/api/data/opening_stock_reconciliation?review_status=negative_review');
+ assert.equal(stockIssues.rows[0].external_id,'11');assert.equal(stockIssues.rows[0].value_toman,null);
+ await pool.query(stockMigration);
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
