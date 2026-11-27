@@ -20,6 +20,7 @@ try {
   const health=await (await page.request.get(url+'/health',{maxRedirects:0})).json();
   assert.equal(health.database,'postgresql');assert.equal(health.mode,'source');
   assert.equal(health.store_writes,false);assert.equal(health.posting_authorized,false);
+  if(process.env.EXPECT_RELEASE)assert.equal(health.version,process.env.EXPECT_RELEASE);
   console.log('browser_public_release='+health.version);
   assert.equal(await page.locator('html').getAttribute('dir'),'rtl');
   assert.equal(await page.locator('input[name=otp]').count(),0);
@@ -59,6 +60,37 @@ try {
     await page.locator(`#nav [data-view="${view}"]`).click();
     await page.waitForFunction(()=>document.querySelector('#content .panel')||document.querySelector('#content .dashboard-welcome'),null,{timeout:16000});
     assert.equal(await page.locator('#content .error').count(),0,'screen '+view);
+    if(view==='opening_costs'){
+      const costs=await page.request.get(url+'/api/data/opening_costs');
+      assert.equal(costs.status(),200);
+      assert.ok((await costs.json()).rows.length>0);
+      await page.getByRole('button',{name:'اصلاح قیمت',exact:true}).first().click();
+      await page.locator('#detail:not([hidden]) input[type=number]').waitFor({state:'visible'});
+      await page.locator('#closeDrawer').click();
+    }
+    if(view==='opening_balances'){
+      const evidence=await page.request.get(url+'/api/data/opening_balances');
+      assert.equal(evidence.status(),200);
+      const {rows}=await evidence.json();
+      assert.equal(rows.length,12);
+      assert.equal(rows.filter(r=>r.account_kind==='supplier_payable'&&r.party).length,3);
+      assert.equal(rows.filter(r=>r.account_kind==='gateway'&&r.rules).length,5);
+      assert.equal(await page.locator('#content tbody tr').count(),12);
+    }
+    if(view==='opening_valuation'){
+      const result=await page.request.get(url+'/api/data/opening_valuation');
+      assert.equal(result.status(),200);
+      const valuation=await result.json();
+      assert.equal(valuation.posting_authorized,false);
+      assert.equal(valuation.status,'review');
+      assert.ok(valuation.capture&&valuation.preview.length>0);
+      const units=v=>{const [whole,fraction='']=v.split('.');return BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0'));};
+      assert.equal(valuation.preview.reduce((sum,line)=>sum+units(line.debit)-units(line.credit),0n),0n);
+      await page.getByRole('heading',{name:'پیش‌نویس تطبیق افتتاحیه',exact:true}).waitFor();
+      console.log('browser_opening_costs_balances_and_balanced_review_verified=true');
+      console.log('opening_stock_row_counts='+JSON.stringify(Object.fromEntries(valuation.counts.map(row=>[row.review_status,row.count]))));
+      console.log('opening_woo_activity_review='+JSON.stringify(valuation.activity));
+    }
     if(view==='source_orders'&&controls.includes('source_categories')&&dashboard.orders>0){
       await page.locator('#content button').filter({hasText:'جزئیات'}).first().click();
       await page.locator('#detail:not([hidden])').waitFor({state:'visible'});

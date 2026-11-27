@@ -3,7 +3,7 @@ name: Upgrade Vesta Accounting on the existing host
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/upgrade-accounting.yml', 'runtime/upgrade-host.sh', 'runtime/sync.mjs', 'runtime/source.mjs', 'runtime/acceptance.mjs', 'runtime/vesta-accounting-catalog.php', 'runtime/install-catalog-adapter.sh']
+    paths: ['.github/workflows/upgrade-accounting.yml', 'runtime/upgrade-host.sh', 'runtime/sync.mjs', 'runtime/source.mjs', 'runtime/acceptance.mjs', 'runtime/vesta-accounting-catalog.php', 'runtime/install-catalog-adapter.sh', 'runtime/004_opening_input_review.sql', 'runtime/opening-review.mjs', 'edge-demo/ui.mjs', 'edge-demo/worker.mjs']
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,7 +14,7 @@ jobs:
   upgrade:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/product/production-password-auth'
     runs-on: ubuntu-latest
-    timeout-minutes: 16
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -73,3 +73,16 @@ jobs:
           sshpass -e scp "${args[@]}" runtime/upgrade-host.sh runtime/verify-accounting-login.py "$target:/srv/vesta-accounting/private/"
           sshpass -e scp "${args[@]}" "$RUNNER_TEMP/upgrade-login.json" "$target:/srv/vesta-accounting/private/upgrade-login.json"
           sshpass -e ssh "${args[@]}" "$target" "bash /srv/vesta-accounting/private/upgrade-host.sh '$GITHUB_SHA'"
+
+      - name: Verify the deployed HTTPS accounting interface
+        env:
+          ADMIN: ${{ secrets.ADMIN }}
+          PASS: ${{ secrets.PASS }}
+          CHROME_PATH: /usr/bin/google-chrome
+          EXPECT_RELEASE: ${{ github.sha }}
+          EXPECT_PRIVATE_SYNC_TOTALS: '1'
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/browser" --ignore-scripts playwright@1.62.1
+          test -x /usr/bin/google-chrome
+          BROWSER_OUTPUT="$RUNNER_TEMP/vesta-screenshots" PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser/node_modules/playwright" node runtime/browser-smoke.mjs
