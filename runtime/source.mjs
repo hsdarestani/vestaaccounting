@@ -1,7 +1,7 @@
 import {financialReadiness} from './financial-readiness.mjs';
 import {stockReconciliationList,recordStockReconciliation} from './opening-stock-reconciliation.mjs';
 import {openingBridgeList,recordOpeningBridge} from './opening-balance-bridge.mjs';
-import {salesProposalList} from './woo-sale-proposals.mjs';
+import {salesProposalList,createRevenueDraft} from './woo-sale-proposals.mjs';
 import {settlementList,recordSettlement,draftSettlement} from './gateway-settlement-evidence.mjs';
 import {wooReconciliation} from './woo-reconciliation.mjs';
 import {correctPurchaseCost,openingReviewModules,reviewOpeningInput} from './opening-review.mjs';
@@ -46,6 +46,7 @@ export class WooSource{
 export function verifyWebhook(secret,payload,signature){if(!secret||typeof signature!=='string')return false;try{const a=createHmac('sha256',secret).update(payload).digest(),b=Buffer.from(signature,'base64');return a.length===b.length&&timingSafeEqual(a,b);}catch{return false;}}
 export async function acceptWebhook(pool,{secret,payload,signature,topic,deliveryId}){if(!verifyWebhook(secret,payload,signature))return false;const body=JSON.parse(payload.toString('utf8'));if(!Number.isSafeInteger(body.id)||body.id<=0||typeof topic!=='string'||topic.length>100||!deliveryId||deliveryId.length>150)return false;const fp=hash(payload),key=topic+':'+deliveryId;await pool.query('INSERT INTO sync_events(event_key,topic,fingerprint,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[key,topic,fp,String(body.id)]);const existing=(await pool.query('SELECT fingerprint FROM sync_events WHERE event_key=$1',[key])).rows[0];if(existing.fingerprint!==fp){await pool.query("UPDATE sync_events SET status='review' WHERE event_key=$1",[key]);return false;}await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return true;}
 export function sourceService(pool){return {
+ createRevenueDraft(input,actor){return createRevenueDraft(pool,input,actor);},
  recordStockReconciliation(input,actor){return recordStockReconciliation(pool,input,actor);},
  recordOpeningBridge(input,actor){return recordOpeningBridge(pool,input,actor);},
  recordSettlement(input,actor){return recordSettlement(pool,input,actor);},
