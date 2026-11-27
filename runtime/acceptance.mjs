@@ -24,6 +24,8 @@ try{
  await pool.query(stockMigration);
  const revenueMigration=await readFile(new URL('008_woo_revenue_drafts.sql',import.meta.url),'utf8');
  await pool.query(revenueMigration);
+ const costMigration=await readFile(new URL('009_inventory_cost_evidence.sql',import.meta.url),'utf8');
+ await pool.query(costMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -259,6 +261,25 @@ try{
  assert.equal(readiness.preview.find(r=>r.account==='1200').debit,'198');
  assert.equal(readiness.preview.find(r=>r.account==='3010').credit,'296.40');
  assert.equal(readiness.posting_authorized,false);
+ 
+ const inventoryEvidence={kind:'inventory_cost_evidence',source_kind:'variations',external_id:'11',parent_id:'10',reference:'Synthetic chronological receipts and issues',coverage_confirmed:true,events:[
+  {at:'2026-11-24T09:00:00Z',kind:'purchase',ref:'IN-COST-1',quantity:3,value_toman:'150'},
+  {at:'2026-11-25T09:00:00Z',kind:'sale',ref:'OUT-COST-1',quantity:2,value_toman:''}
+ ]};
+ await request('/api/operate','POST',{...inventoryEvidence,coverage_confirmed:false},400);
+ await request('/api/operate','POST',{...inventoryEvidence,events:[]},409);
+ const [costEvidenceSaved]=await request('/api/operate','POST',inventoryEvidence,201);
+ assert.equal(costEvidenceSaved.result.sales_cogs_toman,'77');
+ assert.equal(costEvidenceSaved.result.ending_value_toman,'271');
+ assert.equal(costEvidenceSaved.result.ending_quantity,'7');
+ assert.equal(costEvidenceSaved.result.posting_authorized,false);
+ const [repeatCostEvidence]=await request('/api/operate','POST',inventoryEvidence,201);
+ assert.equal(repeatCostEvidence.id,costEvidenceSaved.id);assert.equal(repeatCostEvidence.duplicate,true);
+ const [historyCost]=await request('/api/data/inventory_cost_evidence?id=11');
+ assert.equal(historyCost.rows[0].cost_review_status,'calculated_review');
+ assert.equal(historyCost.rows[0].sales_cogs_toman,'77');
+ await assert.rejects(pool.query("UPDATE inventory_cost_evidence SET actor='changed' WHERE id=$1",[costEvidenceSaved.id]),/immutable record/);
+ await pool.query(costMigration);
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
