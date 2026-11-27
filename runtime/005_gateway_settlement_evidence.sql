@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS gateway_settlement_evidence (
  gross_toman numeric(16,2) NOT NULL CHECK(gross_toman>0 AND gross_toman<=1000000000000),
  net_toman numeric(16,2) NOT NULL CHECK(net_toman>0),
  fee_toman numeric(16,2) NOT NULL CHECK(fee_toman>=0),
+ ledger_basis text NOT NULL CHECK(ledger_basis IN ('gross_unexpensed','net_already_expensed','unknown')),
  evidence_note text NOT NULL CHECK(length(trim(evidence_note)) BETWEEN 1 AND 500),
  actor text NOT NULL,
  at timestamptz NOT NULL DEFAULT now(),
