@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {mkdir} from 'node:fs/promises';
+import {mkdir,readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -90,6 +90,24 @@ try {
       console.log('browser_opening_costs_balances_and_balanced_review_verified=true');
       console.log('opening_stock_row_counts='+JSON.stringify(Object.fromEntries(valuation.counts.map(row=>[row.review_status,row.count]))));
       console.log('opening_woo_activity_review='+JSON.stringify(valuation.activity));
+    }
+    if(view==='woo_reconciliation'){
+      const activity=await page.request.get(url+'/api/data/woo_reconciliation');
+      assert.equal(activity.status(),200);
+      const evidence=await activity.json();
+      assert.ok(evidence.summary.some(row=>row.event_kind==='order_created'&&row.count>0));
+      assert.ok(evidence.summary.some(row=>row.event_kind==='order_paid'&&row.count>0));
+      await page.getByRole('button',{name:'اعمال تاریخ',exact:true}).waitFor();
+      const download=page.waitForEvent('download');
+      await page.getByRole('button',{name:'Excel جمع گردش',exact:true}).click();
+      const file=await download;
+      assert.match(file.suggestedFilename(),/\.xlsx$/);
+      const buffer=await readFile(await file.path());
+      assert.equal(buffer.readUInt32LE(),0x04034b50);
+      console.log('browser_woo_reconciliation_and_excel_verified=true');
+      console.log('woo_reconciliation_review_counts='+JSON.stringify(evidence.summary.reduce((counts,row)=>{
+        counts[row.event_kind]=(counts[row.event_kind]||0)+row.count;return counts;
+      },{})));
     }
     if(view==='source_orders'&&controls.includes('source_categories')&&dashboard.orders>0){
       await page.locator('#content button').filter({hasText:'جزئیات'}).first().click();

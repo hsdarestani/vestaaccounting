@@ -96,6 +96,14 @@ try{
  assert.equal(updatedCosts.rows[0].original_cost_toman,25);
  assert.equal(updatedCosts.rows[0].revision,newCost.revision);
  assert.equal(updatedCosts.rows[0].cost_status,'owner_entered');
+ await persistPage(pool,'orders',[{id:567,currency:'IRR',total:'1234',status:'completed',
+  payment_method:'synthetic_gateway',date_created_gmt:'2026-11-23T20:29:59',date_paid_gmt:'2026-11-23T20:30:01'}]);
+ await persistPage(pool,'refunds',[{id:568,amount:'55',date_created_gmt:'2026-11-26T11:20:00'}],'567');
+ const [bridge]=await request('/api/data/woo_reconciliation');
+ assert.equal(bridge.rows.length,2);
+ assert.equal(bridge.rows.find(r=>r.event_kind==='order_paid').amount_exact,'123.4');
+ assert.equal(bridge.rows.find(r=>r.event_kind==='refund_created').amount_exact,'5.5');
+ assert.equal(bridge.rows.find(r=>r.event_kind==='order_paid').local_date,'2026-11-24');
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
