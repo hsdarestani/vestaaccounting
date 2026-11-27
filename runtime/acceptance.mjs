@@ -22,6 +22,8 @@ try{
  await pool.query(bridgeMigration);
  const stockMigration=await readFile(new URL('007_opening_stock_reconciliation.sql',import.meta.url),'utf8');
  await pool.query(stockMigration);
+ const revenueMigration=await readFile(new URL('008_woo_revenue_drafts.sql',import.meta.url),'utf8');
+ await pool.query(revenueMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -186,6 +188,28 @@ try{
  assert.equal(proposalResult.rows.find(r=>r.external_id==='584').reasons.includes('refund_review'),true);
  assert.equal(proposalResult.rows.find(r=>r.external_id==='585').reasons.includes('identity_review'),true);
  assert.equal((await pool.query('SELECT count(*) n FROM journals')).rows[0].n,journalCountBeforeProposal);
+ const wholeOrder={...completed,id:586,total:'115',total_tax:'10',shipping_tax:'1',shipping_lines:[{total:'5',total_tax:'1'}]};
+ await persistPage(pool,'orders',[wholeOrder]);
+ const [wholeRows]=await request('/api/data/sales_proposals?id=586&start=2026-11-24&end=2026-11-26');
+ const whole=wholeRows.rows[0];
+ assert.equal(whole.draft_status,'draft_candidate');
+ await request('/api/operate','POST',{kind:'woo_revenue_draft',external_id:'580',revision_id:proposal.revision_id},409);
+ const beforeRevenuePosted=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
+ const inputDraft={kind:'woo_revenue_draft',external_id:'586',revision_id:whole.revision_id};
+ const [revenueDraft]=await request('/api/operate','POST',inputDraft,201);
+ const [repeatedRevenue]=await request('/api/operate','POST',inputDraft,201);
+ assert.equal(revenueDraft.ref,'woo-revenue:586');assert.equal(repeatedRevenue.duplicate,true);
+ const revenueJournal=(await pool.query('SELECT id,status FROM journals WHERE ref=$1',[revenueDraft.ref])).rows[0];
+ assert.equal(revenueJournal.status,'draft');
+ const revenueLines=(await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[revenueJournal.id])).rows;
+ assert.equal(revenueLines.reduce((sum,l)=>sum+l.debit-l.credit,0),0);
+ assert.equal(revenueLines.find(l=>l.account==='1100').debit,115);
+ assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,beforeRevenuePosted);
+ await persistPage(pool,'refunds',[{id:587,amount:'5',date_created_gmt:'2026-11-26T11:30:00'}],'586');
+ const [staleRevenue]=await request('/api/data/sales_proposals?id=586&start=2026-11-24&end=2026-11-26');
+ assert.equal(staleRevenue.rows[0].draft_status,'draft_stale');
+ await request('/api/operate','POST',inputDraft,409);
+ 
   
  const openingBridge={kind:'opening_bridge',line_key:'bank-7640',evidence_date:'2026-11-26',observed_time:'10:30',increases_toman:'30.10',decreases_toman:'5.05',reference:'Synthetic complete statements',coverage_confirmed:true};
  await request('/api/operate','POST',{...openingBridge,coverage_confirmed:false},400);
