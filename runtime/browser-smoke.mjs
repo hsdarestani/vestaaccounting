@@ -91,6 +91,46 @@ try {
       console.log('opening_stock_row_counts='+JSON.stringify(Object.fromEntries(valuation.counts.map(row=>[row.review_status,row.count]))));
       console.log('opening_woo_activity_review='+JSON.stringify(valuation.activity));
     }
+    if(view==='settlement_evidence'){
+      const response=await page.request.get(url+'/api/data/settlement_evidence');
+      assert.equal(response.status(),200);const evidence=await response.json();
+      assert.ok(Array.isArray(evidence.rows)&&Array.isArray(evidence.summary));
+      await page.getByRole('button',{name:'ثبت مدرک تسویه',exact:true}).waitFor();
+      console.log('browser_settlement_evidence_verified=true');
+    }
+    if(view==='sales_proposals'){
+      const response=await page.request.get(url+'/api/data/sales_proposals');
+      assert.equal(response.status(),200);const evidence=await response.json();
+      assert.equal(evidence.posting_authorized,false);
+      assert.ok(Array.isArray(evidence.rows));
+      await page.getByRole('heading',{name:'پیشنهاد خودکار اسناد فروش',exact:true}).waitFor();
+      console.log('browser_sales_proposals_verified=true');
+    }
+    if(view==='opening_bridge'){
+      const response=await page.request.get(url+'/api/data/opening_bridge');
+      assert.equal(response.status(),200);const evidence=await response.json();
+      assert.equal(evidence.posting_authorized,false);assert.equal(evidence.rows.length,12);
+      await page.getByRole('button',{name:'ثبت مدرک تطبیق',exact:true}).waitFor();
+      console.log('browser_opening_balance_bridge_verified=true');
+    }
+    if(view==='opening_stock_reconciliation'){
+      const response=await page.request.get(url+'/api/data/opening_stock_reconciliation');
+      assert.equal(response.status(),200);const evidence=await response.json();
+      assert.equal(evidence.posting_authorized,false);assert.ok(evidence.capture&&evidence.rows.length>0);
+      await page.getByRole('button',{name:'ثبت مدرک موجودی',exact:true}).waitFor();
+      console.log('browser_opening_stock_reconciliation_verified=true');
+    }
+    if(view==='financial_readiness'){
+      const response=await page.request.get(url+'/api/data/financial_readiness');
+      assert.equal(response.status(),200);const evidence=await response.json();
+      assert.equal(evidence.posting_authorized,false);assert.equal(evidence.preview_is_partial,true);
+      assert.ok(evidence.coverage.imported_costs>0&&evidence.coverage.stock_total>0);
+      const units=v=>{const [whole,fraction='']=v.split('.');return BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0'));};
+      assert.equal(evidence.preview.reduce((sum,row)=>sum+units(row.debit)-units(row.credit),0n),0n);
+      await page.getByRole('heading',{name:'وضعیت واقعی دفتر مالی',exact:true}).waitFor();
+      console.log('browser_financial_readiness_verified=true');
+      console.log('financial_readiness_counts='+JSON.stringify(evidence.coverage));
+    }
     if(view==='woo_reconciliation'){
       const activity=await page.request.get(url+'/api/data/woo_reconciliation');
       assert.equal(activity.status(),200);
