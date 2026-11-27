@@ -135,7 +135,7 @@ try{
  assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeMargin);
 
   // Real financial writes remain blocked; settlement evidence is exact and draft creation is explicit.
- const settlement={kind:'settlement_evidence',gateway_account:'1310',bank_account:'1012',gateway_ref:'SYN-GW-1',bank_ref:'SYN-BANK-1',settlement_date:'2026-11-25',gross_toman:'110',net_toman:'100',fee_toman:'10',evidence_note:'Synthetic paired provider and bank statements'};
+ const settlement={kind:'settlement_evidence',gateway_account:'1310',bank_account:'1012',gateway_ref:'SYN-GW-1',bank_ref:'SYN-BANK-1',settlement_date:'2026-11-25',gross_toman:'110',net_toman:'100',fee_toman:'10',ledger_basis:'gross_unexpensed',evidence_note:'Synthetic paired provider and bank statements'};
  const [savedSettlement]=await request('/api/operate','POST',settlement,201);
  const [repeatedSettlement]=await request('/api/operate','POST',settlement,201);
  assert.equal(repeatedSettlement.id,savedSettlement.id);assert.equal(repeatedSettlement.duplicate,true);
