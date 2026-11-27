@@ -28,6 +28,8 @@ try{
  await pool.query(costMigration);
  const expenseMigration=await readFile(new URL('010_operating_expense_evidence.sql',import.meta.url),'utf8');
  await pool.query(expenseMigration);
+ const purchaseMigration=await readFile(new URL('011_purchase_invoice_evidence.sql',import.meta.url),'utf8');
+ await pool.query(purchaseMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -206,6 +208,29 @@ try{
 
 
  
+
+ const purchaseEvidence={kind:'purchase_invoice_evidence',supplier_id:'expense-ci-supplier',invoice_ref:'PURCHASE-CI-1',received_tehran:'2026-11-25T10:00',total_toman:'150',evidence_note:'Synthetic received credit purchase',receipt_confirmed:true,credit_purchase_confirmed:true,items:[{source_kind:'variations',external_id:'11',parent_id:'10',quantity:3,value_toman:'150'}]};
+ await request('/api/operate','POST',{...purchaseEvidence,receipt_confirmed:false},400);
+ await request('/api/operate','POST',{...purchaseEvidence,total_toman:'151'},400);
+ await request('/api/operate','POST',{...purchaseEvidence,items:[{...purchaseEvidence.items[0],parent_id:'999'}]},409);
+ await request('/api/operate','POST',{...purchaseEvidence,invoice_ref:'EXPENSE-CI-2'},409);
+ const [purchaseSaved]=await request('/api/operate','POST',purchaseEvidence,201);
+ const [purchaseRepeat]=await request('/api/operate','POST',purchaseEvidence,201);
+ assert.equal(purchaseRepeat.id,purchaseSaved.id);assert.equal(purchaseRepeat.duplicate,true);
+ await request('/api/operate','POST',{...expense,invoice_ref:'PURCHASE-CI-1',payment_ref:'PURCHASE-AS-EXPENSE'},409);
+ const [fractionalPurchase]=await request('/api/operate','POST',{...purchaseEvidence,invoice_ref:'PURCHASE-CI-2',total_toman:'150.25',items:[{...purchaseEvidence.items[0],value_toman:'150.25'}]},201);
+ await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:fractionalPurchase.id},409);
+ const beforePurchasePosted=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
+ const [purchaseDraft]=await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:purchaseSaved.id},201);
+ const [purchaseDraftRepeat]=await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:purchaseSaved.id},201);
+ assert.equal(purchaseDraftRepeat.id,purchaseDraft.id);
+ assert.deepEqual((await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[purchaseDraft.id])).rows,[{account:'1200',debit:150,credit:0},{account:'2010',debit:0,credit:150}]);
+ const [purchases]=await request('/api/data/purchase_invoice_evidence?start=2026-11-25&end=2026-11-25');
+ assert.equal(purchases.rows.length,2);assert.equal(purchases.posting_authorized,false);
+ assert.equal(purchases.rows.find(r=>r.id===purchaseSaved.id).purchase_status,'draft_created');
+ assert.equal(purchases.summary[0].total_toman,'300.25');
+ assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,beforePurchasePosted);
+ await assert.rejects(pool.query("UPDATE purchase_invoice_evidence SET total_toman=0 WHERE id=$1",[purchaseSaved.id]),/immutable record/);
  // Completed Woo sales yield balanced revenue proposals, not cash receipts or posted documents.
  const completed={id:580,currency:'IRT',status:'completed',date_created_gmt:'2026-11-24T09:00:00',date_paid_gmt:'2026-11-24T09:01:00',date_completed_gmt:'2026-11-25T09:00:00',total:'114.5',total_tax:'9.5',discount_total:'10',shipping_total:'5',shipping_tax:'0.5',refunds:[],fee_lines:[],shipping_lines:[{total:'5',total_tax:'0.5'}],line_items:[{id:1,product_id:10,variation_id:11,quantity:2,subtotal:'110',total:'100',total_tax:'9'}]};
  await persistPage(pool,'orders',[completed,{...completed,id:581,total:'115'},{...completed,id:582,status:'processing',date_completed_gmt:null},{...completed,id:583,currency:'IRR',total:'1145',total_tax:'95',discount_total:'100',shipping_total:'50',shipping_tax:'5',shipping_lines:[{total:'50',total_tax:'5'}],line_items:[{id:1,product_id:10,variation_id:11,quantity:2,subtotal:'1100',total:'1000',total_tax:'90'}]},{...completed,id:584,refunds:[{id:999}]},{...completed,id:585,line_items:[{id:1,product_id:999,variation_id:11,quantity:2,subtotal:'110',total:'100',total_tax:'9'}]}]);
