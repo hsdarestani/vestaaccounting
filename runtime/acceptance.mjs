@@ -167,6 +167,21 @@ try{
  const [unknownEvidence]=await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-UNKNOWN',bank_ref:'SYN-BANK-UNKNOWN',ledger_basis:'unknown'},201);
  await request('/api/operate','POST',{kind:'settlement_draft',id:unknownEvidence.id},409);
 
+ 
+ // Completed Woo sales yield balanced revenue proposals, not cash receipts or posted documents.
+ const completed={id:580,currency:'IRT',status:'completed',date_created_gmt:'2026-11-24T09:00:00',date_paid_gmt:'2026-11-24T09:01:00',date_completed_gmt:'2026-11-25T09:00:00',total:'114.5',total_tax:'9.5',discount_total:'10',shipping_total:'5',shipping_tax:'0.5',refunds:[],fee_lines:[],shipping_lines:[{total:'5',total_tax:'0.5'}],line_items:[{id:1,product_id:10,variation_id:11,quantity:2,subtotal:'110',total:'100',total_tax:'9'}]};
+ await persistPage(pool,'orders',[completed,{...completed,id:581,total:'115'},{...completed,id:582,status:'processing',date_completed_gmt:null},{...completed,id:583,currency:'IRR',total:'1145',total_tax:'95',discount_total:'100',shipping_total:'50',shipping_tax:'5',shipping_lines:[{total:'50',total_tax:'5'}],line_items:[{id:1,product_id:10,variation_id:11,quantity:2,subtotal:'1100',total:'1000',total_tax:'90'}]},{...completed,id:584,refunds:[{id:999}]},{...completed,id:585,line_items:[{id:1,product_id:999,variation_id:11,quantity:2,subtotal:'110',total:'100',total_tax:'9'}]}]);
+ const journalCountBeforeProposal=(await pool.query('SELECT count(*) n FROM journals')).rows[0].n;
+ const [proposalResult]=await request('/api/data/sales_proposals?start=2026-11-24&end=2026-11-26');
+ const proposal=proposalResult.rows.find(r=>r.external_id==='580');
+ assert.equal(proposal.status,'revenue_proposed');assert.equal(proposal.posting_authorized,false);
+ assert.deepEqual(proposal.lines,[{account:'1100',debit:'114.5',credit:'0'},{account:'4010',debit:'0',credit:'110'},{account:'4030',debit:'10',credit:'0'},{account:'4020',debit:'0',credit:'5'},{account:'2100',debit:'0',credit:'9.5'}]);
+ assert.equal(proposalResult.rows.find(r=>r.external_id==='581').reasons.includes('total_mismatch'),true);
+ assert.equal(proposalResult.rows.find(r=>r.external_id==='582').reasons.includes('completion_review'),true);
+ assert.deepEqual(proposalResult.rows.find(r=>r.external_id==='583').lines,proposal.lines);
+ assert.equal(proposalResult.rows.find(r=>r.external_id==='584').reasons.includes('refund_review'),true);
+ assert.equal(proposalResult.rows.find(r=>r.external_id==='585').reasons.includes('identity_review'),true);
+ assert.equal((await pool.query('SELECT count(*) n FROM journals')).rows[0].n,journalCountBeforeProposal);
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
