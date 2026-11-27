@@ -16,6 +16,8 @@ try{
  await pool.query(await readFile(new URL('003_opening_evidence.sql',import.meta.url),'utf8'));
  const openingMigration=await readFile(new URL('004_opening_input_review.sql',import.meta.url),'utf8');
  await pool.query(openingMigration);
+ const settlementMigration=await readFile(new URL('005_gateway_settlement_evidence.sql',import.meta.url),'utf8');
+ await pool.query(settlementMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -132,6 +134,33 @@ try{
  assert.equal(byStatus.status_review.count,1);
  assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeMargin);
 
+  // Real financial writes remain blocked; settlement evidence is exact and draft creation is explicit.
+ const settlement={kind:'settlement_evidence',gateway_account:'1310',bank_account:'1012',gateway_ref:'SYN-GW-1',bank_ref:'SYN-BANK-1',settlement_date:'2026-11-25',gross_toman:'110',net_toman:'100',fee_toman:'10',evidence_note:'Synthetic paired provider and bank statements'};
+ const [savedSettlement]=await request('/api/operate','POST',settlement,201);
+ const [repeatedSettlement]=await request('/api/operate','POST',settlement,201);
+ assert.equal(repeatedSettlement.id,savedSettlement.id);assert.equal(repeatedSettlement.duplicate,true);
+ await request('/api/operate','POST',{...settlement,net_toman:'99'},400);
+ await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-OTHER'},409);
+ const [fractionalSettlement]=await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-2',bank_ref:'SYN-BANK-2',gross_toman:'11.25',net_toman:'10.10',fee_toman:'1.15'},201);
+ const [settlementReport]=await request('/api/data/settlement_evidence');
+ assert.equal(settlementReport.rows.length,2);assert.equal(settlementReport.summary[0].gross_toman,'121.25');assert.equal(settlementReport.summary[0].net_toman,'110.10');
+ assert.equal(settlementReport.rows.find(r=>r.id===fractionalSettlement.id).settlement_status,'fractional_review');
+ await request('/api/operate','POST',{kind:'settlement_draft',id:fractionalSettlement.id},409);
+ await pool.query(`INSERT INTO periods(id,title,starts,ends) SELECT 'settlement-ci','Settlement CI','2026-11-25','2026-11-25'
+ WHERE NOT EXISTS(SELECT 1 FROM periods WHERE date '2026-11-25' BETWEEN starts AND ends)`);
+ const postedBeforeSettlement=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
+ const [settlementDraft]=await request('/api/operate','POST',{kind:'settlement_draft',id:savedSettlement.id},201);
+ const [repeatDraft]=await request('/api/operate','POST',{kind:'settlement_draft',id:savedSettlement.id},201);
+ assert.equal(repeatDraft.id,settlementDraft.id);
+ const journal=(await pool.query('SELECT status FROM journals WHERE id=$1',[settlementDraft.id])).rows[0];
+ assert.equal(journal.status,'draft');
+ const draftLines=(await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[settlementDraft.id])).rows;
+ assert.deepEqual(draftLines,[{account:'1012',debit:100,credit:0},{account:'1310',debit:0,credit:110},{account:'5020',debit:10,credit:0}]);
+ assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeSettlement);
+ await assert.rejects(pool.query("UPDATE gateway_settlement_evidence SET net_toman=1 WHERE id=$1",[savedSettlement.id]),/immutable record/);
+ await pool.query(settlementMigration);
+ const [updatedSettlementReport]=await request('/api/data/settlement_evidence');
+ assert.equal(updatedSettlementReport.rows.find(r=>r.id===savedSettlement.id).settlement_status,'draft_created');
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
