@@ -216,6 +216,25 @@ try{
  const [stockIssues]=await request('/api/data/opening_stock_reconciliation?review_status=negative_review');
  assert.equal(stockIssues.rows[0].external_id,'11');assert.equal(stockIssues.rows[0].value_toman,null);
  await pool.query(stockMigration);
+ 
+ const [notReady]=await request('/api/data/financial_readiness');
+ assert.equal(notReady.posting_authorized,false);
+ assert.equal(notReady.preview_is_partial,true);
+ assert.equal(notReady.coverage.balance_negative,1);
+ assert.equal(notReady.coverage.stock_negative,1);
+ assert.equal(notReady.rows.find(r=>r.key==='posting_gate').status,'required');
+ assert.equal(notReady.preview.length,0);
+ await request('/api/operate','POST',openingBridge,201);
+ await request('/api/operate','POST',stockEvidence,201);
+ const [readiness]=await request('/api/data/financial_readiness');
+ assert.equal(readiness.coverage.balance_missing,0);
+ assert.equal(readiness.coverage.balance_fractional,1);
+ assert.equal(readiness.coverage.stock_evidence_missing,0);
+ assert.equal(readiness.rows.find(r=>r.key==='ledger_precision').status,'required');
+ assert.equal(readiness.preview.find(r=>r.account==='1012').debit,'98.40');
+ assert.equal(readiness.preview.find(r=>r.account==='1200').debit,'198');
+ assert.equal(readiness.preview.find(r=>r.account==='3010').credit,'296.40');
+ assert.equal(readiness.posting_authorized,false);
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
