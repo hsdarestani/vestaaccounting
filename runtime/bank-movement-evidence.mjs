@@ -47,7 +47,7 @@ export async function recordBankMovement(pool,b,actor){
 }
 export async function draftBankMovement(pool,b,actor){
  const id=clean(b.id,80);if(!id)return fail('مدرک معتبر لازم است.');const conn=await pool.connect();try{
-  await conn.query('BEGIN');const {rows:[e]}=await conn.query('SELECT *,amount_toman::text amount_exact FROM bank_movement_evidence WHERE id=$1 FOR UPDATE',[id]);
+  await conn.query('BEGIN');const {rows:[e]}=await conn.query('SELECT id,movement_kind,movement_date,bank_account,other_bank_account,party_id,amount_toman::text AS amount_exact FROM bank_movement_evidence WHERE id=$1 FOR UPDATE',[id]);
   if(!e){await conn.query('ROLLBACK');return fail('مدرک گردش یافت نشد.',404);}
   const prior=await conn.query('SELECT journal_id FROM bank_movement_drafts WHERE evidence_id=$1',[id]);if(prior.rowCount){await conn.query('COMMIT');return {id:prior.rows[0].journal_id,duplicate:true};}
   const amount=cents(e.amount_exact);if(amount===null||amount%100n!==0n){await conn.query('ROLLBACK');return fail('مبلغ دقیق محفوظ است؛ دفتر فعلی تومان صحیح می‌پذیرد.',409);}
