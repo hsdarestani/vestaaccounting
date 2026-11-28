@@ -30,6 +30,8 @@ try{
  await pool.query(expenseMigration);
  const purchaseMigration=await readFile(new URL('011_purchase_invoice_evidence.sql',import.meta.url),'utf8');
  await pool.query(purchaseMigration);
+ const supplierPaymentMigration=await readFile(new URL('012_supplier_payment_evidence.sql',import.meta.url),'utf8');
+ await pool.query(supplierPaymentMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -231,6 +233,33 @@ try{
  assert.equal(purchases.summary[0].total_toman,'300.25');
  assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,beforePurchasePosted);
  await assert.rejects(pool.query("UPDATE purchase_invoice_evidence SET total_toman=0 WHERE id=$1",[purchaseSaved.id]),/immutable record/);
+ const supplierPayment={kind:'supplier_payment_evidence',purchase_id:purchaseSaved.id,payment_date:'2026-11-25',bank_account:'1012',payment_ref:'SUPPLIER-BANK-CI-1',amount_toman:'60',evidence_note:'Synthetic invoice payment receipt',allocation_confirmed:true};
+ await request('/api/operate','POST',{...supplierPayment,allocation_confirmed:false},400);
+ await request('/api/operate','POST',{...supplierPayment,payment_ref:'SYN-BANK-1'},409);
+ await request('/api/operate','POST',{...supplierPayment,amount_toman:'151'},409);
+ const [supplierPaymentSaved]=await request('/api/operate','POST',supplierPayment,201);
+ const [supplierPaymentRepeat]=await request('/api/operate','POST',supplierPayment,201);
+ assert.equal(supplierPaymentRepeat.id,supplierPaymentSaved.id);assert.equal(supplierPaymentRepeat.duplicate,true);
+ await request('/api/operate','POST',{...supplierPayment,amount_toman:'61'},409);
+ await request('/api/operate','POST',{...supplierPayment,payment_ref:'SUPPLIER-BANK-CI-OVER',amount_toman:'91'},409);
+ await request('/api/operate','POST',{...expense,invoice_ref:'EXPENSE-AS-SUPPLIER-PAYMENT',payment_ref:supplierPayment.payment_ref},409);
+ await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-SUPPLIER',bank_ref:supplierPayment.payment_ref},409);
+ const [paymentReport]=await request('/api/data/supplier_payment_evidence?start=2026-11-25&end=2026-11-25');
+ assert.equal(paymentReport.invoices.find(i=>i.id===purchaseSaved.id).outstanding_toman,'90.00');
+ assert.equal(paymentReport.posting_authorized,false);
+ const beforeSupplierPayment=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
+ const [supplierPaymentDraft]=await request('/api/operate','POST',{kind:'supplier_payment_draft',id:supplierPaymentSaved.id},201);
+ const [supplierPaymentDraftRepeat]=await request('/api/operate','POST',{kind:'supplier_payment_draft',id:supplierPaymentSaved.id},201);
+ assert.equal(supplierPaymentDraftRepeat.id,supplierPaymentDraft.id);
+ assert.deepEqual((await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[supplierPaymentDraft.id])).rows,[{account:'1012',debit:0,credit:60},{account:'2010',debit:60,credit:0}]);
+ await request('/api/operate','POST',{...supplierPayment,payment_ref:'SUPPLIER-BANK-CI-2',amount_toman:'90'},201);
+ const [fullyPaid]=await request('/api/data/supplier_payment_evidence');
+ assert.equal(fullyPaid.invoices.some(i=>i.id===purchaseSaved.id),false);
+ await request('/api/operate','POST',{...supplierPayment,payment_ref:'SUPPLIER-BANK-CI-EXTRA',amount_toman:'1'},409);
+ assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,beforeSupplierPayment);
+ await assert.rejects(pool.query('DELETE FROM supplier_payment_evidence WHERE id=$1',[supplierPaymentSaved.id]),/immutable record/);
+ await pool.query(supplierPaymentMigration);
+
  // Completed Woo sales yield balanced revenue proposals, not cash receipts or posted documents.
  const completed={id:580,currency:'IRT',status:'completed',date_created_gmt:'2026-11-24T09:00:00',date_paid_gmt:'2026-11-24T09:01:00',date_completed_gmt:'2026-11-25T09:00:00',total:'114.5',total_tax:'9.5',discount_total:'10',shipping_total:'5',shipping_tax:'0.5',refunds:[],fee_lines:[],shipping_lines:[{total:'5',total_tax:'0.5'}],line_items:[{id:1,product_id:10,variation_id:11,quantity:2,subtotal:'110',total:'100',total_tax:'9'}]};
  await persistPage(pool,'orders',[completed,{...completed,id:581,total:'115'},{...completed,id:582,status:'processing',date_completed_gmt:null},{...completed,id:583,currency:'IRR',total:'1145',total_tax:'95',discount_total:'100',shipping_total:'50',shipping_tax:'5',shipping_lines:[{total:'50',total_tax:'5'}],line_items:[{id:1,product_id:10,variation_id:11,quantity:2,subtotal:'1100',total:'1000',total_tax:'90'}]},{...completed,id:584,refunds:[{id:999}]},{...completed,id:585,line_items:[{id:1,product_id:999,variation_id:11,quantity:2,subtotal:'110',total:'100',total_tax:'9'}]}]);
