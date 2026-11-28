@@ -1,5 +1,6 @@
 import {refundReviewList,createRefundDraft} from './woo-refund-review.mjs';
 import {bankMovementList,recordBankMovement,draftBankMovement} from './bank-movement-evidence.mjs';
+import {bankStatementList,importBankStatement,reconcileBankStatement,confirmStatementMatch} from './bank-statements.mjs';
 import {operationalDashboard,searchPurchaseCatalog} from './operational-dashboard.mjs';
 import {supplierPaymentList,recordSupplierPayment,draftSupplierPayment} from './supplier-payment-evidence.mjs';
 import {purchaseInvoiceList,recordPurchaseInvoice,draftPurchaseInvoice} from './purchase-invoice-evidence.mjs';
@@ -54,6 +55,10 @@ export function verifyWebhook(secret,payload,signature){if(!secret||typeof signa
 export async function acceptWebhook(pool,{secret,payload,signature,topic,deliveryId}){if(!verifyWebhook(secret,payload,signature))return false;const body=JSON.parse(payload.toString('utf8'));if(!Number.isSafeInteger(body.id)||body.id<=0||typeof topic!=='string'||topic.length>100||!deliveryId||deliveryId.length>150)return false;const fp=hash(payload),key=topic+':'+deliveryId;await pool.query('INSERT INTO sync_events(event_key,topic,fingerprint,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[key,topic,fp,String(body.id)]);const existing=(await pool.query('SELECT fingerprint FROM sync_events WHERE event_key=$1',[key])).rows[0];if(existing.fingerprint!==fp){await pool.query("UPDATE sync_events SET status='review' WHERE event_key=$1",[key]);return false;}await pool.query('UPDATE sync_control SET requested=true WHERE id=1');return true;}
 export function sourceService(pool){return {
  async bankMovements(url){return bankMovementList(pool,url);},
+ async bankStatements(url){return bankStatementList(pool,url);},
+ async importBankStatement(input,actor){return importBankStatement(pool,input,actor);},
+ async reconcileBankStatement(input,actor){return reconcileBankStatement(pool,input,actor);},
+ async confirmBankStatement(input,actor){return confirmStatementMatch(pool,input,actor);},
  async recordBankMovement(input,actor){return recordBankMovement(pool,input,actor);},
  async draftBankMovement(input,actor){return draftBankMovement(pool,input,actor);},
  async openingStockTemplate(){return openingStockTemplate(pool);},

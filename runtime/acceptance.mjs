@@ -37,6 +37,7 @@ try{
  const expenseCategoriesMigration=await readFile(new URL('014_expense_categories.sql',import.meta.url),'utf8');
  await pool.query(expenseCategoriesMigration);
  const bankMovementMigration=await readFile(new URL('015_bank_movement_evidence.sql',import.meta.url),'utf8');await pool.query(bankMovementMigration);
+ const bankStatementMigration=await readFile(new URL('016_bank_statements.sql',import.meta.url),'utf8');await pool.query(bankStatementMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -459,7 +460,22 @@ try{
  const [bankList]=await request('/api/data/bank_evidence');assert.equal(bankList.rows.find(r=>r.id===bankSaved.id).movement_status,'draft_created');assert.equal(bankList.rows.find(r=>r.id===fractionTransfer.id).amount_toman,'3.75');assert.equal(bankList.posting_authorized,false);
  await assert.rejects(pool.query('UPDATE bank_movement_evidence SET amount_toman=0 WHERE id=$1',[bankSaved.id]),/immutable record/);
  await pool.query(bankMovementMigration);
+ const statement={account:'1012',currency:'IRR',rows:[{reference:'BANK-MOVE-IN',transaction_date:'2026-11-25',direction:'credit',amount:'1250',description:'Synthetic transfer receipt'},{reference:'STATEMENT-ALT-EXPENSE',transaction_date:'2026-11-25',direction:'debit',amount:'1250',description:'Synthetic paid expense'},{reference:'BANK-MOVE-FRACTION-IN',transaction_date:'2026-11-25',direction:'credit',amount:'575',description:'Synthetic discrepancy'}]};
+ const [importedStatement]=await request('/api/bank-statement','POST',statement,201);assert.equal(importedStatement.saved,3);assert.equal(importedStatement.matched,1);
+ const [repeatedStatement]=await request('/api/bank-statement','POST',statement,201);assert.equal(repeatedStatement.duplicates,3);assert.equal(repeatedStatement.saved,0);
+ await request('/api/bank-statement','POST',{...statement,rows:[{...statement.rows[0],reference:'ATOMIC-NEW'},{...statement.rows[0],amount:'1251'}]},409);
+ assert.equal((await pool.query('SELECT count(*) n FROM bank_statement_rows')).rows[0].n,3);
+ await request('/api/bank-statement','POST',{...statement,rows:[{...statement.rows[0],reference:'TOO-PRECISE',amount:'1.01'}]},400);
+ const [statementReview]=await request('/api/data/bank_statements?account=1012');assert.equal(statementReview.rows.find(r=>r.reference==='BANK-MOVE-IN').match_status,'matched');assert.equal(statementReview.rows.find(r=>r.reference==='BANK-MOVE-FRACTION-IN').match_status,'conflict');
+ const alternate=statementReview.rows.find(r=>r.reference==='STATEMENT-ALT-EXPENSE');assert.equal(alternate.match_status,'review');const candidate=alternate.candidates.find(c=>c.reference==='EXPENSE-BANK-1');assert.ok(candidate);
+ await request('/api/bank-statement','POST',{action:'confirm',statement_id:alternate.id,source_key:candidate.source_key,note:'Synthetic receipt',confirmed:false},400);
+ await request('/api/bank-statement','POST',{action:'confirm',statement_id:alternate.id,source_key:candidate.source_key,note:'Synthetic receipt',confirmed:true},201);
+ const [confirmedStatement]=await request('/api/data/bank_statements?match_status=matched');assert.equal(confirmedStatement.rows.length,2);assert.equal(confirmedStatement.rows.find(r=>r.id===alternate.id).method,'owner_confirmed');
+ const [reconcileEmpty]=await request('/api/bank-statement','POST',{action:'reconcile',account:'1012'},201);assert.equal(reconcileEmpty.matched,0);
+ await assert.rejects(pool.query("UPDATE bank_statement_rows SET amount_toman=1 WHERE reference='BANK-MOVE-IN'"),/immutable record/);
+ await pool.query(bankStatementMigration);
 await request('/api/logout','POST',{});await request('/api/dashboard','GET',null,401);
+ await request('/api/data/bank_statements','GET',null,401);
  await request('/api/purchase-catalog','GET',null,401);
  assert.equal((await pool.query("SELECT COALESCE(SUM(debit-credit),0) n FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted'")).rows[0].n,0);
 

@@ -55,3 +55,10 @@ Phase one deployed and verified: release b0c106beb421e287e734b9ae51f685c13a2afb1
 Latest verified application release: `de42ac4c481b03ddc1c9403918ecdedcbd460429`; `/health` confirmed PostgreSQL, source mode, healthy, store writes false, posting authorized false. Backup, synthetic PostgreSQL acceptance, production authenticated HTTPS browser tests and rollback protection completed through the authorized upgrade workflow. No synthetic production ledger records were created.
 
 Readiness at the latest production verification: 12/12 missing opening balance bridge evidence rows; 5,686/5,686 stock reconciliation rows lack evidence; 147 captured quantities missing; 2,434 purchase costs imported, of which the estimated-cost review identifies 1,072 estimates and 91 priority items; 3 open exceptions; no settlement evidence recorded. WooCommerce first sync completed, current refresh in progress, no source error reported; no refund rows imported at verification. These are counts, not certified balances. The ledger is not yet authoritative; Vesta is not yet a complete replacement for the legacy system.
+
+## Phase five: bank statement import and reconciliation
+
+- CSV/TSV UTF-8 import from Excel with header mapping, selected bank/currency/calendar, split credit/debit or single amount/direction, local preview and explicit confirmation. Original currency/amount and exact converted Toman preserved; no fabricated bank transaction or automatic journal.
+- Immutable row identity per bank/reference; atomic batch validation, conflict detection, idempotent replay and exact reference/date/direction/amount matching to settlement, paid expense, supplier payment and bank movement evidence.
+- Owner-confirmed alternatives require equal account/date/direction/amount and documentary note; prohibit reused/conflicting evidence. Unmatched/conflicting rows remain reviewable and filterable; no WooCommerce payment status treated as banking evidence.
+- Local tests and PostgreSQL/production validation pending before release verification.

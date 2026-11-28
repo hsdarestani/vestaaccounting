@@ -213,6 +213,15 @@ try {
       assert.equal(await page.locator('select[name=other_bank_account]').isVisible(),false);assert.equal(await page.locator('select[name=party_id]').getAttribute('required'),'');
       await page.locator('select[name=movement_kind]').selectOption('transfer');assert.equal(await page.locator('select[name=other_bank_account]').isVisible(),true);
     }
+    if(view==='bank_statements'){
+      const response=await page.request.get(url+'/api/data/bank_statements');assert.equal(response.status(),200);assert.equal((await response.json()).posting_authorized,false);
+      const file=page.locator('#content input[type=file]');await file.setInputFiles({name:'preview.csv',mimeType:'text/csv',buffer:Buffer.from('تاریخ,مرجع,واریز,برداشت,شرح\n۱۴۰۵/۰۹/۰۵,PREVIEW-ONLY,۱۲۵۰,۰,نمونه پیش‌نمایش')});
+      await page.locator('#content select[name=account]').selectOption('1010');await page.locator('#content select[name=currency]').selectOption('IRR');
+      await page.getByRole('button',{name:'ثبت صورت‌حساب',exact:true}).waitFor();await page.waitForFunction(()=>!Array.from(document.querySelectorAll('#content button')).find(b=>b.textContent==='ثبت صورت‌حساب').disabled);
+      // Synthetic preview stays in the browser; no POST to the real ledger.
+      await file.setInputFiles({name:'preview-invalid.csv',mimeType:'text/csv',buffer:Buffer.from('تاریخ,مرجع,واریز,برداشت,شرح\n۱۴۰۵/۰۹/۰۵,PREVIEW-ONLY,۱۲۵۰,۱۰,نمونه')});await page.waitForFunction(()=>Array.from(document.querySelectorAll('#content .hint')).some(x=>x.textContent.includes('تنها یکی')));
+      assert.equal(await page.getByRole('button',{name:'ثبت صورت‌حساب',exact:true}).isDisabled(),true);
+    }
     if(['reports','balance_sheet','cashflow'].includes(view))assert.equal(await page.locator('#content .card strong').filter({hasText:'نامشخص'}).count(),4);
   }
   phase='logout';
