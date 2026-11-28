@@ -28,6 +28,12 @@ export function reportDates(){
  const preset=(period)=>{
   const [y,m,d]=today();
   if(period==='day')return [format([y,m,d]),format([y,m,d])];
+  if(period==='year')return [format([y,1,1]),format([y,m,d])];
+  if(period==='week'){
+   const date=new Date(parse(format([y,m,d]))+'T12:00:00Z');
+   date.setUTCDate(date.getUTCDate()-((date.getUTCDay()+1)%7));
+   return [format(read(date)),format([y,m,d])];
+  }
   // The monthly report covers the current Jalali month through today.
   return [format([y,m,1]),format([y,m,d])];
  };
