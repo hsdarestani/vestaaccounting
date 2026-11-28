@@ -34,6 +34,8 @@ try{
  await pool.query(supplierPaymentMigration);
  const refundMigration=await readFile(new URL('013_refund_review.sql',import.meta.url),'utf8');
  await pool.query(refundMigration);
+ const expenseCategoriesMigration=await readFile(new URL('014_expense_categories.sql',import.meta.url),'utf8');
+ await pool.query(expenseCategoriesMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -420,6 +422,17 @@ try{
  assert.deepEqual(catalogSearch.rows.map(r=>[r.source_kind,r.external_id,r.parent_id]),[['variations','11','10']]);
  assert.equal(catalogSearch.rows[0].name,'Changed');
  const [catalogEmpty]=await request('/api/purchase-catalog?q=nonexistent-product');assert.deepEqual(catalogEmpty.rows,[]);
+ const [manualParty]=await request('/api/parties','POST',{kind:'supplier',name:'Synthetic New Supplier',ref:'manual-CI-party',note:'Synthetic contact'},201);
+ const [newOptions]=await request('/api/options');assert.ok(newOptions.parties.some(p=>p.id===manualParty.id));
+ const [category]=await request('/api/expense-category','POST',{name:'Synthetic extra category',account:'5040',active:true},201);
+ const categorized={...expense,expense_account:undefined,category_id:category.id,invoice_ref:'EXPENSE-CI-CATEGORY',payment_ref:'EXPENSE-BANK-CATEGORY'};
+ const [catExpense]=await request('/api/operate','POST',categorized,201);
+ const [catRepeat]=await request('/api/operate','POST',categorized,201);assert.equal(catRepeat.id,catExpense.id);assert.equal(catRepeat.duplicate,true);
+ const [catList]=await request('/api/data/expense_evidence?start=2026-11-25&end=2026-11-25');assert.equal(catList.rows.find(r=>r.id===catExpense.id).category_name,'Synthetic extra category');assert.equal(catList.rows.find(r=>r.id===catExpense.id).expense_account,'5040');
+ await request('/api/expense-category','POST',{id:category.id,name:'Synthetic renamed category',active:false},201);
+ await request('/api/operate','POST',{...categorized,invoice_ref:'EXPENSE-INACTIVE',payment_ref:'EXPENSE-BANK-INACTIVE'},400);
+ await pool.query(expenseCategoriesMigration);
+ const [categoryAfterMigration]=await request('/api/data/expense_evidence');assert.equal(categoryAfterMigration.categories.find(c=>c.id===category.id).active,false);assert.equal(categoryAfterMigration.rows.find(r=>r.id===catExpense.id).category_name,'Synthetic renamed category');
 await request('/api/logout','POST',{});await request('/api/dashboard','GET',null,401);
  await request('/api/purchase-catalog','GET',null,401);
  assert.equal((await pool.query("SELECT COALESCE(SUM(debit-credit),0) n FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted'")).rows[0].n,0);

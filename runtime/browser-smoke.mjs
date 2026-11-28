@@ -152,6 +152,14 @@ try {
         await page.locator('#content input[name=value_toman]').fill('۱۲٬۳۴۵٫۵۰');
         assert.equal(await page.locator('#content input[name=total_toman]').inputValue(),'12345.50');
       }
+      if(view==='expense_evidence'){
+        assert.ok(evidence.categories.length>=17);
+        await page.locator('select[name=funding_account]').selectOption('2010');
+        assert.equal(await page.locator('select[name=supplier_id]').getAttribute('required'),'');
+        assert.equal(await page.locator('input[name=payment_ref]').isVisible(),false);
+        await page.getByText('مدیریت دسته‌های هزینه',{exact:true}).click();
+        await page.getByRole('button',{name:'ذخیره دسته هزینه',exact:true}).waitFor();
+      }
       if(view==='refund_review')await page.getByRole('heading',{name:'بررسی استرداد کامل و جزئی',exact:true}).waitFor();
       console.log('browser_'+view+'_verified=true');
     }
@@ -185,6 +193,7 @@ try {
       assert.equal(await page.locator('#content .table').getByText('تعداد رکوردهای ذخیره‌شده در PostgreSQL',{exact:true}).count(),7);
       console.log('browser_authenticated_sync_totals_verified=true');
     }
+    if(view==='customers'||view==='suppliers')await page.getByRole('button',{name:view==='customers'?'ثبت مشتری جدید':'ثبت تأمین‌کننده جدید',exact:true}).waitFor();
   }
   phase='logout';
   await page.locator('#logout').click();

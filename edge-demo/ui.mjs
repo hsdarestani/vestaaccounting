@@ -94,7 +94,8 @@ function browserApp(){
   Object.assign(labels,{payment_date:'تاریخ پرداخت',supplier_payment_status:'وضعیت سند',allocated_toman:'پرداخت مستند (تومان)',outstanding_toman:'مانده تخصیص‌نیافته (تومان)',total_toman:'مبلغ کل (تومان)'});
   cols.purchase_invoice_evidence=['purchase_date','supplier_name','invoice_ref','total_toman','purchase_items','purchase_status','draft_ref','evidence_note'];
   Object.assign(labels,{purchase_date:'تاریخ دریافت کالا',purchase_items:'اقلام دریافت‌شده',purchase_status:'وضعیت سند',total_toman:'مبلغ کل (تومان)'});
-  cols.expense_evidence=['expense_date','expense_account','funding_account','supplier_name','invoice_ref','payment_ref','amount_toman','description','expense_status','draft_ref'];
+  cols.expense_evidence=['expense_date','category_name','expense_account','funding_account','supplier_name','invoice_ref','payment_ref','amount_toman','description','expense_status','draft_ref'];
+  labels.category_name='دسته هزینه';
   Object.assign(labels,{expense_date:'تاریخ هزینه',expense_account:'سرفصل هزینه',funding_account:'حساب پرداخت / بدهی',supplier_name:'تأمین‌کننده',invoice_ref:'مرجع فاکتور',payment_ref:'مرجع پرداخت',expense_status:'وضعیت سند'});
   cols.inventory_cost_evidence=['source_kind','external_id','parent_id','name','opening_quantity','opening_value_toman','received_quantity','issued_quantity','observed_quantity','cost_status','cost_review_status','sales_cogs_toman','ending_value_toman'];
   Object.assign(labels,{opening_value_toman:'ارزش افتتاحیه (تومان)',cost_review_status:'وضعیت محاسبه',sales_cogs_toman:'بهای فروش پیشنهادی (تومان)',ending_value_toman:'ارزش پایان گردش (تومان)'});
@@ -181,9 +182,9 @@ function browserApp(){
     const select=async range=>{const a=localizedDates.parse(range[0]),b=localizedDates.parse(range[1]);if(!a||!b||a>b)throw Error('بازه تاریخ شمسی معتبر انتخاب کنید.');dashboardRange=range;await go('dashboard');};
     toolbar.append(add(el('label','از تاریخ شمسی'),start),add(el('label','تا تاریخ شمسی'),end),button('اعمال',()=>select([start.value,end.value]),'primary'));
     for(const [period,label] of [['day','امروز'],['week','این هفته'],['month','این ماه'],['year','امسال']])toolbar.append(button(label,()=>select(localizedDates.preset(period))));
-    const stats=(key)=>source.initial_complete&&o?.totals?.[key]?.unknown===0&&o?.undated===0?o.totals[key].amount:null;
+    const stats=(key)=>source.initial_complete&&o?.totals?.[key]?.unknown===0?o.totals[key].amount:null;
     const fin=(value)=>verified?value:null;
-    const sourceHint='تومان · سفارش تکمیل‌شده، پیش از استرداد؛ نه درآمد دفتر';
+    const sourceHint=(source.last_error||source.refresh_in_progress||o?.undated>0?'اطلاعات ناقص · ':'')+'تومان · سفارش تکمیل‌شده، پیش از استرداد؛ نه درآمد دفتر';
     const financialHint=verified?'تومان · دفتر قطعی':'در انتظار تأیید افتتاحیه و دفتر';
     const hero=add(el('section',undefined,'dashboard-welcome'),add(el('div'),el('span','فضای کاری مالی','tiny'),el('h2','سلام، به وستا خوش آمدید'),el('p','عملکرد فروش و وضعیت مالی کسب‌وکارتان در یک نگاه.')),add(el('div',undefined,'welcome-actions'),button('گزارش مالی',()=>go('reports'),'primary')));
     const actions=el('div',undefined,'quick-actions');
@@ -204,6 +205,14 @@ function browserApp(){
   }
   async function detail(type,id){const d=await api('/details?type='+encodeURIComponent(type)+'&id='+encodeURIComponent(id));$('drawerTitle').textContent=({journals:'سند حسابداری',documents:'مدرک عملیاتی و سند',products:'گردش کالا',parties:'صورتحساب طرف حساب'})[type];const fields=Object.entries(d.record).filter(([k])=>!['id','version','period'].includes(k));const kv=el('div',undefined,'kv');for(const [k,v] of fields)kv.append(add(el('div'),el('small',labels[k]||k),add(el('b'),display(k,v))));const content=[kv];if(d.lines)content.push(panel('ردیف‌های مالی','تومان',table(d.lines,['account','detail','debit','credit'])));if(d.movements)content.push(panel('گردش موجودی','بهای ثبت‌شده',table(d.movements,['date','kind','delta','value_delta','qty_after','value_after'])));if(d.transactions)content.push(panel('تاریخچه تراکنش','مدارک آزمایشی',table(d.transactions,['date','ref','kind','gross'],'sales')));$('drawerBody').replaceChildren(...content);$('detail').hidden=false;$('overlay').hidden=false;$('closeDrawer').focus();}
   function closeDrawer(){$('detail').hidden=true;$('overlay').hidden=true;}
+  function manualPartyForm(module){
+    const kind=module==='customers'?'customer':'supplier',name=el('input'),note=el('textarea'),form=el('form'),fields=el('div',undefined,'forms');
+    name.required=true;name.maxLength=180;note.maxLength=180;note.placeholder='شماره تماس یا توضیح اختیاری';const ref='manual-'+crypto.randomUUID();
+    const title=kind==='customer'?'ثبت مشتری جدید':'ثبت تأمین‌کننده جدید',save=el('button',title,'primary');save.type='submit';
+    fields.append(add(el('label','نام طرف حساب'),name),add(el('label','اطلاعات تماس / توضیح'),note));form.append(fields,save);
+    form.addEventListener('submit',async e=>{e.preventDefault();save.disabled=true;try{await api('/parties','POST',{kind,name:name.value,note:note.value,ref});opts=await api('/options');await go(module);msg('طرف حساب ذخیره شد. مانده مالی نیازمند سند معتبر است.');}catch(err){msg(err.message,true);}finally{save.disabled=false;}});
+    return panel(title,'شناسه پرونده به‌صورت خودکار ایجاد می‌شود. مانده افتتاحیه از این فرم ثبت نمی‌شود.',form);
+  }
   function excel(rows,columns){
     const workbook=reportWorkbook(rows,columns,k=>labels[k]||k,(k,value)=>{
       if(value==null)return {value:null};
@@ -348,8 +357,8 @@ function browserApp(){
     function expenseEvidenceForm(){
       const form=el('form'),fg=el('div',undefined,'forms');
       const defs=[
-        {k:'expense_date',t:'تاریخ شمسی هزینه',type:'text'},
-        {k:'expense_account',t:'سرفصل هزینه',type:'select',choices:opts.accounts.filter(a=>['5030','5040','5090'].includes(a.code)).map(a=>[a.code,a.title])},
+        {k:'expense_date',t:'تاریخ شمسی هزینه',type:'text',initial:localizedDates.preset('day')[0]},
+        {k:'category_id',t:'دسته هزینه',type:'select',choices:[['','انتخاب دسته'],...(d.categories||[]).filter(c=>c.active).map(c=>[c.id,c.name])]},
         {k:'funding_account',t:'حساب پرداخت یا بدهی',type:'select',choices:opts.accounts.filter(a=>['1010','1011','1012','1013','2010'].includes(a.code)).map(a=>[a.code,a.title])},
         {k:'supplier_id',t:'تأمین‌کننده (برای بدهی الزامی)',type:'select',choices:[['','انتخاب نشده'],...opts.parties.filter(p=>p.kind==='supplier').map(p=>[p.id,p.name])]},
         {k:'invoice_ref',t:'شناسه یکتای فاکتور یا مدرک هزینه',type:'text'},
@@ -358,13 +367,22 @@ function browserApp(){
         {k:'description',t:'شرح و مرجع مستند هزینه',type:'text'}
       ];
       for(const def of defs)fg.append(field({...def,required:!['supplier_id','payment_ref'].includes(def.k)}));
+      const funding=fg.querySelector('[name=funding_account]'),supplier=fg.querySelector('[name=supplier_id]'),payment=fg.querySelector('[name=payment_ref]');
+      const updateFields=()=>{const debt=funding.value==='2010';supplier.required=debt;payment.required=!debt;payment.disabled=debt;payment.parentElement.hidden=debt;if(debt)payment.value='';};funding.addEventListener('change',updateFields);updateFields();
+      fg.querySelector('[name=amount_toman]').inputMode='decimal';
       const submit=el('button','ثبت مدرک هزینه','primary');submit.type='submit';form.append(fg,submit);
       form.addEventListener('submit',async e=>{e.preventDefault();submit.disabled=true;try{
         const b=Object.fromEntries(new FormData(form));b.expense_date=localizedDates.parse(b.expense_date.trim());if(!b.expense_date)throw Error('تاریخ شمسی نامعتبر است.');
-        b.amount_toman=b.amount_toman.trim().replace(/[۰-۹]/g,x=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(x))).replace(/[٠-٩]/g,x=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(x))).replace(/٫/g,'.');
+        b.amount_toman=b.amount_toman.trim().replace(/[۰-۹]/g,x=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(x))).replace(/[٠-٩]/g,x=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(x))).replace(/٫/g,'.').replace(/[٬,\s]/g,'');
         await operate({...b,kind:'expense_evidence'});await go(m);msg('مدرک هزینه ذخیره شد؛ ثبت قطعی انجام نشده است.');
       }catch(err){msg(err.message,true);}finally{submit.disabled=false;}});
-      return panel('ثبت هزینه مستند','برای هزینه پرداخت‌شده حساب بانک یا صندوق و شناسه پرداخت را وارد کنید؛ برای هزینه پرداخت‌نشده حساب بدهی و تأمین‌کننده را انتخاب کنید. خرید کالا و کارمزد درگاه در این بخش ثبت نمی‌شوند.',form);
+      const categoryDetails=el('details'),catForm=el('form'),catFields=el('div',undefined,'forms');
+      const categories=d.categories||[],catSelect=el('select'),catName=el('input'),catAccount=el('select'),catActive=el('input');catSelect.append(add(el('option','دسته جدید')));catSelect.firstChild.value='';for(const c of categories){const opt=el('option',c.name+(c.active?'':' (غیرفعال)'));opt.value=c.id;catSelect.append(opt);}catName.required=true;catName.maxLength=100;
+      for(const a of opts.accounts.filter(x=>['5030','5040','5090'].includes(x.code))){const o=el('option',a.title);o.value=a.code;catAccount.append(o);}catAccount.value='5090';catActive.type='checkbox';catActive.checked=true;
+      catSelect.addEventListener('change',()=>{const c=categories.find(x=>x.id===catSelect.value);catName.value=c?.name||'';catAccount.value=c?.account||'5090';catAccount.disabled=!!c;catActive.checked=c?.active??true;});
+      catFields.append(add(el('label','دسته مورد نظر'),catSelect),add(el('label','نام دسته'),catName),add(el('label','حساب هزینه'),catAccount),add(el('label','فعال'),catActive));const saveCat=el('button','ذخیره دسته هزینه','primary');saveCat.type='submit';catForm.append(catFields,saveCat);categoryDetails.append(el('summary','مدیریت دسته‌های هزینه'),catForm);
+      catForm.addEventListener('submit',async e=>{e.preventDefault();saveCat.disabled=true;try{await api('/expense-category','POST',{id:catSelect.value||null,name:catName.value,account:catAccount.value,active:catActive.checked});await go(m);msg('دسته هزینه ذخیره شد.');}catch(err){msg(err.message,true);}finally{saveCat.disabled=false;}});
+      return panel('ثبت هزینه مستند','برای هزینه پرداخت‌شده حساب بانک یا صندوق و شناسه پرداخت را وارد کنید؛ برای هزینه پرداخت‌نشده حساب بدهی و تأمین‌کننده را انتخاب کنید. خرید کالا و کارمزد درگاه در این بخش ثبت نمی‌شوند.',form,categoryDetails);
     }
     function inventoryCostForm(){
       const form=el('form'),fg=el('div',undefined,'forms');
@@ -468,7 +486,7 @@ function browserApp(){
         chartCards.replaceChildren(panel('جمع فاکتورهای خرید نسیه','فقط فاکتورهای مستند ثبت‌شده؛ مانده قطعی بدهی یا انبار نیست.',table(d.summary||[],summaryCols),button('Excel جمع خرید',()=>excel(d.summary||[],summaryCols)),...candidates));
       }
       if(m==='expense_evidence'){
-        const summaryCols=['expense_account','funding_account','count','amount_toman'];
+        const summaryCols=['category_name','expense_account','funding_account','count','amount_toman'];
         const candidates=role==='owner'?shown.filter(r=>r.expense_status==='draft_candidate').map(r=>button('پیش‌نویس هزینه '+r.invoice_ref,async()=>{
           try{await operate({kind:'expense_draft',id:r.id});await refresh();msg('پیش‌نویس هزینه ساخته شد؛ هنوز قطعی نشده است.');}catch(err){msg(err.message,true);}
         })):[];
@@ -525,7 +543,7 @@ function browserApp(){
     }
     if(!['financial_readiness','opening_balances','opening_bridge'].includes(m))toolbar.append(button('صفحه بعد',async()=>{if((d.rows||[]).length<100)return;filter.page++;await refresh();}),button('قبلی',async()=>{filter.page=Math.max(0,filter.page-1);await refresh();}));draw();const items=[chartCards,panel(names[m],m==='opening_review'?'پیش‌نویس موجودی از ووکامرس؛ نه مانده افتتاحیه تأییدشده. نبودِ تعداد یا SKU و موجودی منفی نیازمند بررسی است.':m.startsWith('source_')?'مقادیر خام ووکامرس، ثبت نشده در دفتر مالی':mode==='source'?'دفتر مالی مستقل؛ ثبت قطعی واقعی غیرفعال':'مبالغ به تومان · داده آزمایشی',toolbar,result)];if(m==='opening_valuation')items.unshift(...valuationPanels(d));if(m==='opening_balances')items.unshift(panel('مدارک مانده‌های ۵ آذر','مبالغ اعلامی پیش از تطبیق با گردش حساب. مبالغ خالص درگاه دوباره مشمول کارمزد نمی‌شوند.'));if(m==='opening_review')items.unshift(panel('وضعیت برداشت موجودی',d.phase==='live_preview'?'پیش‌نمایش زنده؛ برداشت لحظه شروع هنوز انجام نشده و هیچ بهای خرید قطعی ثبت نشده است.':'مدرک نزدیک زمان شروع ذخیره شده؛ هنوز باید با گردش کالا، بهای خرید و موجودی فیزیکی تطبیق شود.'));if(role==='owner'){if(m==='supplier_payment_evidence')items.unshift(supplierPaymentForm());if(m==='purchase_invoice_evidence')items.unshift(purchaseInvoiceForm());if(m==='expense_evidence')items.unshift(expenseEvidenceForm());if(m==='inventory_cost_evidence')items.unshift(inventoryCostForm());if(m==='opening_stock_reconciliation')items.unshift(stockReconciliationForm());if(m==='opening_bridge')items.unshift(openingBridgeForm());if(m==='settlement_evidence')items.unshift(settlementForm());if(m==='journals')items.unshift(journalForm());if(m==='reconciliation')items.unshift(panel('کنترل داخلی','تطبیق دفتر انبار با حساب موجودی، جمع فاکتورها و تراز اسناد؛ اختلاف خارجی نیازمند مدرک است.',button('اجرای تطبیق خودکار',async()=>{const r=await operate({kind:'scan'});await go(m);msg('تعداد اختلاف داخلی: '+fmt(r.issues));},'primary')));if(m==='integration'&&mode==='source')items.unshift(panel('کنترل همگام‌سازی','اجرای مجدد صف فقط‌خواندنی؛ بدون ارسال به دفتر مالی',button('درخواست همگام‌سازی',async()=>{await operate({kind:'sync_retry'});await go(m);msg('درخواست در صف پایدار ثبت شد.');},'primary')));for(const [title,kind,defs] of forms[m]||[])if(mode!=='source'||['account','period','exception','opening_ref'].includes(kind))items.unshift(formPanel(title,kind,defs()));}return items;
   }
-  async function go(m,account){const seq=++sequence;current=m;$('title').textContent=everydayLabels[m]||names[m]||m;$('sidebar').classList.remove('open');$('modeNotice').hidden=m==='dashboard'&&mode==='source';for(const btn of $('nav').querySelectorAll('button')){btn.classList.toggle('active',btn.dataset.view===m);if(btn.dataset.view===m){let parent=btn.parentElement;while(parent&&parent!==$('nav')){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement;}}}$('content').replaceChildren(el('p','در حال بارگذاری…','muted'));msg('');try{const nodes=m==='dashboard'?await dashboard():await moduleView(m,account);if(seq===sequence)$('content').replaceChildren(...nodes);}catch(e){if(seq===sequence)$('content').replaceChildren(el('div',e.message,'panel error'));}}
+  async function go(m,account){const seq=++sequence;current=m;$('title').textContent=everydayLabels[m]||names[m]||m;$('sidebar').classList.remove('open');$('modeNotice').hidden=m==='dashboard'&&mode==='source';for(const btn of $('nav').querySelectorAll('button')){btn.classList.toggle('active',btn.dataset.view===m);if(btn.dataset.view===m){let parent=btn.parentElement;while(parent&&parent!==$('nav')){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement;}}}$('content').replaceChildren(el('p','در حال بارگذاری…','muted'));msg('');try{const nodes=m==='dashboard'?await dashboard():await moduleView(m,account);if(mode==='source'&&role==='owner'&&['customers','suppliers'].includes(m))nodes.unshift(manualPartyForm(m));if(seq===sequence)$('content').replaceChildren(...nodes);}catch(e){if(seq===sequence)$('content').replaceChildren(el('div',e.message,'panel error'));}}
   async function enter(user){csrf=user.csrf;role=user.role;mode=user.mode||'demo';opts=await api('/options');$('userName').textContent=user.username+' · '+(role==='owner'?'مالک':'بازبین');renderNavigation();$('login').hidden=true;$('app').hidden=false;$('today').textContent=jalali(new Date().toISOString());await go('dashboard');}
   $('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginError').textContent='';const b=e.target.querySelector('button');b.disabled=true;try{const d=new FormData(e.target);await enter(await api('/login','POST',{username:d.get('username'),password:d.get('password'),otp:d.get('otp')}));e.target.reset();}catch(e){$('loginError').textContent=e.message;}finally{b.disabled=false;}});$('logout').addEventListener('click',async()=>{try{await api('/logout','POST',{});}finally{leave();}});$('menu').addEventListener('click',()=>$('sidebar').classList.toggle('open'));$('closeDrawer').addEventListener('click',closeDrawer);$('overlay').addEventListener('click',closeDrawer);document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer();});api('/me').then(enter).catch(()=>{});
 }

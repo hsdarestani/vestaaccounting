@@ -2,7 +2,7 @@ import {refundReviewList,createRefundDraft} from './woo-refund-review.mjs';
 import {operationalDashboard,searchPurchaseCatalog} from './operational-dashboard.mjs';
 import {supplierPaymentList,recordSupplierPayment,draftSupplierPayment} from './supplier-payment-evidence.mjs';
 import {purchaseInvoiceList,recordPurchaseInvoice,draftPurchaseInvoice} from './purchase-invoice-evidence.mjs';
-import {expenseEvidenceList,recordExpenseEvidence,draftExpense} from './operating-expense-evidence.mjs';
+import {expenseEvidenceList,recordExpenseEvidence,draftExpense,recordExpenseCategory} from './operating-expense-evidence.mjs';
 import {inventoryCostList,recordInventoryCost} from './inventory-cost-evidence.mjs';
 import {financialReadiness} from './financial-readiness.mjs';
 import {stockReconciliationList,recordStockReconciliation} from './opening-stock-reconciliation.mjs';
@@ -61,6 +61,7 @@ export function sourceService(pool){return {
  recordPurchaseInvoice(input,actor){return recordPurchaseInvoice(pool,input,actor);},
  draftPurchaseInvoice(input,actor){return draftPurchaseInvoice(pool,input,actor);},
  recordExpenseEvidence(input,actor){return recordExpenseEvidence(pool,input,actor);},
+ recordExpenseCategory(input,actor){return recordExpenseCategory(pool,input,actor);},
  draftExpense(input,actor){return draftExpense(pool,input,actor);},
  recordInventoryCost(input,actor){return recordInventoryCost(pool,input,actor);},
  recordStockReconciliation(input,actor){return recordStockReconciliation(pool,input,actor);},
