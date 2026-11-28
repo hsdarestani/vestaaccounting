@@ -89,7 +89,7 @@ export async function recordInventoryCost(pool,b,actor){
   }
   const result=replayInventory({openingQuantity:s.opening_quantity,openingValue:s.value_exact,receivedQuantity:s.received_quantity,issuedQuantity:s.issued_quantity,observedQuantity:s.observed_quantity,cutover:s.cutover,observedAt:s.observed_at_utc,events:movements});
   if(result.error){await conn.query('ROLLBACK');return result;}
-  const evidence={reference:reference.trim(),events:movements,purchase_source:b.use_registered_purchases===true?'registered_invoices':'manual',registered_purchase_count:registered.length};
+  const evidence=b.use_registered_purchases===true?{reference:reference.trim(),events:movements,purchase_source:'registered_invoices',registered_purchase_count:registered.length}:{reference:reference.trim(),events};
   const fingerprint=createHash('sha256').update(JSON.stringify([k,id,p,s.reconciliation_revision,s.cost_revision,s.value_exact,evidence])).digest('hex');
   const inserted=await conn.query(`INSERT INTO inventory_cost_evidence(stock_revision,cost_revision,source_kind,external_id,parent_id,opening_value_toman,evidence,result,fingerprint,actor)
    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10) ON CONFLICT(fingerprint) DO NOTHING RETURNING id`,
