@@ -91,3 +91,9 @@ Readiness at the latest production verification: 12/12 missing opening balance b
 
 - Recognize each source refund once against uncollected receivable and/or a separately tracked customer refund liability, with current immutable source revision and posted collection capacity checks. No refund automatically changes physical inventory.
 - Document actual refund payment independently from recognition, on the actual payment date: select real unmatched bank debit or enter source-currency provider refund report. Exact conversion, no duplicated bank reference, preserved raw evidence, partial payments, remaining liability and provider balance controls. Controlled central posting and posted payments/sales reports; synthetic positive full refund with two disbursements being tested.
+
+## Phase ten: advanced ledger analytics and aging
+
+- Add exact posted-ledger daily, Persian-monthly and Persian-annual revenue, COGS, gross and net profit; product-category margin using current source classification; expense-by-ledger-category totals; provider gross/fee/tax/net collection, settlement, refund and closing clearing balance; conservative single-channel margin attribution with coverage count.
+- Add receivable age and payable invoice due-date buckets as of a selected date, with unknown due dates and remaining unallocated/opening obligations explicitly separated; tax ledger and period comparison, without claiming statutory tax compliance.
+- Each report has appropriate date filters, Persian labels and exact Toman display, Excel and print/PDF. All advanced financial reports remain unknown before actual verified opening approval. Internal cash transfers no longer inflate cash flow inflow/outflow.

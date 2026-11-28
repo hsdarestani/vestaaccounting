@@ -3,6 +3,7 @@ import {bankMovementList,recordBankMovement,draftBankMovement} from './bank-move
 import {bankStatementList,importBankStatement,reconcileBankStatement,confirmStatementMatch} from './bank-statements.mjs';
 import {postingStatus,openingApprovalPreview,activateOpening,controlledTransition,manualSourceDraft,reverseManualSource,controlPeriod} from './source-posting.mjs';
 import {sourceReportModules,sourceLedgerReport,sourceLedgerDashboard,sourceJournalDetails} from './source-reports.mjs';
+import {advancedReportModules,advancedLedgerReport} from './ledger-analytics.mjs';
 import {tomanFields,currencyAudit} from './currency.mjs';
 import {postInventoryJournal,recordStockAdjustment,postStockAdjustment,stockAdjustmentList,stockReturnCandidates} from './source-inventory.mjs';
 import {runWooJournalQueue,wooJournalQueueList} from './woo-journal-queue.mjs';
@@ -69,7 +70,7 @@ export function sourceService(pool){return {
  async reverseManual(input,actor){return reverseManualSource(pool,input,actor);},
  async controlPeriod(input,actor){return controlPeriod(pool,input,actor);},
  async ledgerDashboard(url){return sourceLedgerDashboard(pool,url);},
- async ledgerReport(module,url){return sourceReportModules.includes(module)?sourceLedgerReport(pool,module,url):null;},
+ async ledgerReport(module,url){return sourceReportModules.includes(module)?sourceLedgerReport(pool,module,url):advancedReportModules.includes(module)?advancedLedgerReport(pool,module,url):null;},
  async journalDetails(type,id){return sourceJournalDetails(pool,type,id);},
  async currencyAudit(){return currencyAudit(pool);},
  async postInventoryJournal(input,actor){return postInventoryJournal(pool,input,actor);},
