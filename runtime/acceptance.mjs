@@ -220,7 +220,7 @@ try{
  const [purchaseRepeat]=await request('/api/operate','POST',purchaseEvidence,201);
  assert.equal(purchaseRepeat.id,purchaseSaved.id);assert.equal(purchaseRepeat.duplicate,true);
  await request('/api/operate','POST',{...expense,invoice_ref:'PURCHASE-CI-1',payment_ref:'PURCHASE-AS-EXPENSE'},409);
- const [fractionalPurchase]=await request('/api/operate','POST',{...purchaseEvidence,invoice_ref:'PURCHASE-CI-2',total_toman:'150.25',items:[{...purchaseEvidence.items[0],value_toman:'150.25'}]},201);
+ const [fractionalPurchase]=await request('/api/operate','POST',{...purchaseEvidence,invoice_ref:'PURCHASE-CI-2',total_toman:'150.25',items:[{source_kind:'products',external_id:'12',parent_id:'',quantity:3,value_toman:'150.25'}]},201);
  await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:fractionalPurchase.id},409);
  const beforePurchasePosted=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
  const [purchaseDraft]=await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:purchaseSaved.id},201);
@@ -362,6 +362,20 @@ try{
  const [historyCost]=await request('/api/data/inventory_cost_evidence?id=11');
  assert.equal(historyCost.rows[0].cost_review_status,'calculated_review');
  assert.equal(historyCost.rows[0].sales_cogs_toman,'77');
+ const linkedCost={...inventoryEvidence,use_registered_purchases:true,events:inventoryEvidence.events.filter(e=>e.kind!=='purchase'),reference:'Synthetic linked purchase invoice and sale evidence'};
+ await request('/api/operate','POST',{...inventoryEvidence,use_registered_purchases:true},400);
+ const [linked]=await request('/api/operate','POST',linkedCost,201);
+ assert.equal(linked.result.sales_cogs_toman,'77');assert.equal(linked.result.ending_value_toman,'271');
+ assert.equal(linked.result.rows.find(r=>r.kind==='purchase').ref,'purchase:'+purchaseSaved.id);
+ const [linkedRepeat]=await request('/api/operate','POST',linkedCost,201);
+ assert.equal(linkedRepeat.id,linked.id);assert.equal(linkedRepeat.duplicate,true);
+ const [currentLinked]=await request('/api/data/inventory_cost_evidence?id=11');
+ assert.equal(currentLinked.rows[0].cost_review_status,'calculated_review');
+ await request('/api/operate','POST',{...purchaseEvidence,invoice_ref:'PURCHASE-CI-LATE',received_tehran:'2026-11-25T12:00',total_toman:'20.25',items:[{...purchaseEvidence.items[0],quantity:1,value_toman:'20.25'}]},201);
+ const [staleLinked]=await request('/api/data/inventory_cost_evidence?id=11');
+ assert.equal(staleLinked.rows[0].cost_review_status,'stale_evidence');
+ await request('/api/operate','POST',linkedCost,409);
+
  await assert.rejects(pool.query("UPDATE inventory_cost_evidence SET actor='changed' WHERE id=$1",[costEvidenceSaved.id]),/immutable record/);
  await pool.query(costMigration);
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
