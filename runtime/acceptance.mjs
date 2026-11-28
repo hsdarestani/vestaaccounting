@@ -350,6 +350,14 @@ try{
  await pool.query(bridgeMigration);
  
  const stockEvidence={kind:'opening_stock_reconciliation',source_kind:'variations',external_id:'11',parent_id:'10',observed_tehran:'2026-11-26T10:30',observed_quantity:7,received_quantity:3,issued_quantity:2,reference:'Synthetic physical count and complete movement log',coverage_confirmed:true};
+ const [template]=await request('/api/opening-stock-template');assert.deepEqual(template.rows.map(r=>r.row_key),['variations:11:10']);
+ const batch={observed_tehran:stockEvidence.observed_tehran,reference:stockEvidence.reference,coverage_confirmed:true,rows:[{row_key:'variations:11:10',observed_quantity:7,received_quantity:3,issued_quantity:2}]};
+ await request('/api/opening-stock-bulk','POST',{...batch,rows:[...batch.rows,{...batch.rows[0],row_key:'variations:999:10'}]},409);
+ assert.equal((await pool.query('SELECT count(*) n FROM opening_stock_reconciliation')).rows[0].n,0);
+ const [bulkSaved]=await request('/api/opening-stock-bulk','POST',batch,201);assert.equal(bulkSaved.saved,1);assert.equal(bulkSaved.posting_authorized,false);
+ const [bulkReplay]=await request('/api/opening-stock-bulk','POST',batch,201);assert.equal(bulkReplay.saved,0);assert.equal(bulkReplay.duplicates,1);
+ await request('/api/opening-stock-bulk','POST',{...batch,reference:'Synthetic stale template'},409);
+ const [templateAfter]=await request('/api/opening-stock-template');assert.deepEqual(templateAfter.rows,[]);
  await request('/api/operate','POST',{...stockEvidence,coverage_confirmed:false},400);
  const [stockSaved]=await request('/api/operate','POST',stockEvidence,201);
  const [stockRepeat]=await request('/api/operate','POST',stockEvidence,201);
