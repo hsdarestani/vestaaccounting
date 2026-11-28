@@ -2,23 +2,23 @@
 
 Baseline: production release `8853d5e1cce91bd7d6ab1348a74cbca00ed39a76`.
 
-## Current phase: operational workspace
+## Phase one: operational workspace
 
 - Consolidate the sidebar into ten business sections; retain previous source, opening and reconciliation views under grouped navigation.
 - Dashboard: Jalali today/week/month/year/custom ranges; current completed-order gross amounts (before refunds, distinctly not accounting revenue), exact Toman conversion, actionable alerts, operational entry points, and explicit unknown ledger metrics pending approval.
 - Purchasing: authenticated catalog search by name, variation and SKU; no manual WooCommerce IDs; Jalali receipt date, exact decimal row summation, and Persian digits. Existing credit purchase evidence validation and immutable storage remain intact.
 - Preserve posting guard, read-only WooCommerce integration, existing credentials, production records, backup and rollback infrastructure. No production synthetic financial records.
-- Local SQLite evaluation: 108 API assertions passed. PostgreSQL acceptance and production browser checks must pass through the existing CI/deployment before release verification is claimed.
+- Local SQLite evaluation: 108 API assertions passed. PostgreSQL acceptance and production browser checks passed through the existing CI/deployment.
 
 ## Next phases / remaining limits
 
-- Operational purchase forms for cash/mixed purchases, linked receipts, expenses, bank imports and transfers, gateway settlement matching, inventory returns and adjustments; draft evidence is not a posted financial transaction.
+- Operational purchase forms for cash/mixed purchases, linked receipts, partial/recurring expenses, bank statement import and transaction matching, gateway settlement automation, inventory returns and adjustments; draft evidence is not a posted financial transaction. Basic bank/cash transfer and receipt evidence now exists (phase four).
 - Collect and reconcile actual opening balance bridge evidence, physical stock and historic acquisition costs, including review of estimates. Preserve fractional evidence until the ledger supports exact amounts.
 - Establish approved accounting scope/policies, opening journal, precise ledger, controlled posting, version-aware automated documents, reversals, periods, roles, attachments, and ledger-backed reports before replacing the legacy accounting system.
 - Obtain actual bank statements/provider settlements, supplier payment evidence, and owner/accountant approval where unavailable. Do not invent values or infer bank receipt from Woo payment status.
 - No tax/legal compliance claim; verify applicable Iranian rules with qualified accountant before final approval.
 
-Phase one: PR #37 merged, PostgreSQL 197 HTTP assertions passed (including restore), evaluation suite passed. Deployment run 46136804959; production browser verification must be confirmed.
+Phase one: PR #37 merged, PostgreSQL 197 HTTP assertions passed (including restore), evaluation suite passed, deployment run 46136804959 successful.
 
 ## Phase two: expense categories and counterparties
 
@@ -27,7 +27,7 @@ Phase one: PR #37 merged, PostgreSQL 197 HTTP assertions passed (including resto
 - Authorized owner can create customers/suppliers using a human-readable form with automatic internal reference. This is not automatic WooCommerce identity matching or opening balance posting.
 - Continue to label partial source dashboard values as incomplete when dates or source refresh are missing.
 
-Phase one deployed and verified: release b0c106beb421e287e734b9ae51f685c13a2afb1f, run 46136804959, 51 authenticated screens passed. Readiness at verification: 12 missing balance bridge rows, 5,686 missing stock reconciliation rows, 147 unknown captured quantities, 1,072 cost estimates (91 priority), 3 unresolved exceptions. Phase two PR #38 merged after 206 PostgreSQL HTTP assertions passed; production run must be verified.
+Phase one deployed and verified: release b0c106beb421e287e734b9ae51f685c13a2afb1f, run 46136804959, 51 authenticated screens passed. Phase two PR #38 deployed and verified after 206 PostgreSQL HTTP assertions passed; release e281c422d1d6a6d0ebc9266b8d8b7f6f9ed00ca0, run 46137341384, 51 screens.
 
 ## Phase three: bulk opening stock reconciliation
 
@@ -42,3 +42,16 @@ Phase one deployed and verified: release b0c106beb421e287e734b9ae51f685c13a2afb1
 - Add actual-source evidence forms for bank/cash transfers (both statement references), customer receipts/deposits, owner contributions/withdrawals and loan receipts; exact Toman amounts, Jalali dates, human-readable account/customer selectors.
 - Create balanced, idempotent drafts under open-period and precision controls. Existing expense, settlement and supplier payment flows share the same bank-reference lock and duplicate checks; no inference of money received from WooCommerce status.
 - Account mapping is additive and fails safely if existing account codes conflict. Posting remains gated pending opening reconciliation and owner/accountant approval.
+
+## Verified production status (2026-11-28)
+
+| PR | Scope | PostgreSQL HTTP assertions | Production deployment run | Authenticated screens |
+|---|---|---:|---|---:|
+| 37 | Workspace and purchase catalog | 197 | 46136804959 | 51 |
+| 38 | Expense categories and counterparties | 206 | 46137341384 | 51 |
+| 39 | Bulk stock evidence and unknown-report labels | 212 | 46137953244 | 51 |
+| 40 | Bank/cash evidence and draft controls | 225 | 46138701389 | 52 |
+
+Latest verified application release: `de42ac4c481b03ddc1c9403918ecdedcbd460429`; `/health` confirmed PostgreSQL, source mode, healthy, store writes false, posting authorized false. Backup, synthetic PostgreSQL acceptance, production authenticated HTTPS browser tests and rollback protection completed through the authorized upgrade workflow. No synthetic production ledger records were created.
+
+Readiness at the latest production verification: 12/12 missing opening balance bridge evidence rows; 5,686/5,686 stock reconciliation rows lack evidence; 147 captured quantities missing; 2,434 purchase costs imported, of which the estimated-cost review identifies 1,072 estimates and 91 priority items; 3 open exceptions; no settlement evidence recorded. WooCommerce first sync completed, current refresh in progress, no source error reported; no refund rows imported at verification. These are counts, not certified balances. The ledger is not yet authoritative; Vesta is not yet a complete replacement for the legacy system.
