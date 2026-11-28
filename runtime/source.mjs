@@ -7,6 +7,7 @@ import {tomanFields,currencyAudit} from './currency.mjs';
 import {postInventoryJournal,recordStockAdjustment,postStockAdjustment,stockAdjustmentList,stockReturnCandidates} from './source-inventory.mjs';
 import {runWooJournalQueue,wooJournalQueueList} from './woo-journal-queue.mjs';
 import {recordWooCollection,importGatewayCollections,collectionOrders,collectionBankRows,collectionList,draftWooCollection} from './woo-collections.mjs';
+import {recordRefundPayment,draftRefundPayment,refundPaymentList,refundPaymentCandidates,refundBankRows} from './woo-refund-payments.mjs';
 import {operationalDashboard,searchPurchaseCatalog} from './operational-dashboard.mjs';
 import {supplierPaymentList,recordSupplierPayment,draftSupplierPayment} from './supplier-payment-evidence.mjs';
 import {purchaseInvoiceList,recordPurchaseInvoice,draftPurchaseInvoice} from './purchase-invoice-evidence.mjs';
@@ -84,6 +85,11 @@ export function sourceService(pool){return {
  async collectionBankRows(query){return collectionBankRows(pool,query);},
  async collections(url){return collectionList(pool,url);},
  async draftWooCollection(input,actor){return draftWooCollection(pool,input,actor);},
+ async recordRefundPayment(input,actor){return recordRefundPayment(pool,input,actor);},
+ async draftRefundPayment(input,actor){return draftRefundPayment(pool,input,actor);},
+ async refundPaymentList(url){return refundPaymentList(pool,url);},
+ async refundPaymentCandidates(query){return refundPaymentCandidates(pool,query);},
+ async refundBankRows(query){return refundBankRows(pool,query);},
  async bankMovements(url){return bankMovementList(pool,url);},
  async bankStatements(url){return bankStatementList(pool,url);},
  async importBankStatement(input,actor){return importBankStatement(pool,input,actor);},

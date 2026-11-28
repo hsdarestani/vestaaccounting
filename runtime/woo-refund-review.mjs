@@ -100,7 +100,8 @@ export async function refundReviewList(pool,url){
 }
 export async function createRefundDraft(pool,b,actor){
  const orderId=String(b.order_id??''),refundId=String(b.refund_id??''),revision=b.revision_id;
- if(!validId(orderId)||!validId(refundId)||!Number.isSafeInteger(revision)||revision<1||b.uncollected_receivable_confirmed!==true)return fail('مدرک و تأیید دریافتنی وصول‌نشده لازم است.',400);
+ const paid=b.paid_refund_confirmed===true?money(b.paid_toman,'IRT'):0n;
+ if(!validId(orderId)||!validId(refundId)||!Number.isSafeInteger(revision)||revision<1||paid===null||paid<0n||(paid===0n?b.uncollected_receivable_confirmed!==true:b.paid_refund_confirmed!==true))return fail('مدرک و تأیید نوع استرداد و مبلغ وصول‌شده لازم است.',400);
  const conn=await pool.connect();
  try{
  await conn.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
@@ -108,17 +109,20 @@ export async function createRefundDraft(pool,b,actor){
  const input=await loadOrderRefunds(conn,orderId);
  const p=input&&refundProposals(input).find(r=>r.refund_id===refundId);
  if(!p||p.revision_id!==revision||p.status!=='receivable_reversal_candidate'){await conn.query('ROLLBACK');return fail('مدرک برگشت یا فروش اولیه نیازمند بررسی است.');}
- const prior=await conn.query('SELECT refund_revision,journal_id FROM woo_refund_review_drafts WHERE order_id=$1 AND refund_id=$2',[orderId,refundId]);
- if(prior.rowCount){await conn.query('COMMIT');return prior.rows[0].refund_revision===revision?{id:prior.rows[0].journal_id,duplicate:true}:fail('نسخه استرداد تغییر کرده است.');}
+ const prior=await conn.query('SELECT d.refund_revision,d.journal_id,coalesce(a.paid_toman,0)::text paid FROM woo_refund_review_drafts d LEFT JOIN woo_refund_paid_allocation a USING(order_id,refund_id) WHERE d.order_id=$1 AND d.refund_id=$2',[orderId,refundId]);
+ if(prior.rowCount){await conn.query('COMMIT');return prior.rows[0].refund_revision===revision&&money(prior.rows[0].paid,'IRT')===paid?{id:prior.rows[0].journal_id,duplicate:true}:fail('نسخه یا نوع استرداد تغییر کرده است.');}
  const {rows:[original]}=await conn.query("SELECT status FROM journals WHERE id=$1 FOR SHARE",[input.original_journal]);
  if(!['draft','posted'].includes(original?.status)){await conn.query('ROLLBACK');return fail('سند فروش اولیه معتبر لازم است.');}
+ const amount=money(p.refund_toman,'IRT');if(paid>amount){await conn.query('ROLLBACK');return fail('بخش وصول‌شده بیشتر از مبلغ استرداد است.');}
+ if(paid>0n){const {rows:[limits]}=await conn.query(`SELECT coalesce((SELECT sum(l.debit-l.credit) FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted' AND l.account='1100' AND l.detail=$2),0)::text receivable,coalesce((SELECT sum(e.gross_toman) FROM woo_collection_evidence e JOIN woo_collection_drafts d ON d.evidence_id=e.id JOIN journals j ON j.id=d.journal_id WHERE j.status='posted' AND e.order_id=$1),0)::text collected,coalesce((SELECT sum(a.paid_toman) FROM woo_refund_paid_allocation a JOIN woo_refund_review_drafts d USING(order_id,refund_id) JOIN journals j ON j.id=d.journal_id WHERE j.status='posted' AND a.order_id=$1),0)::text previous`,[orderId,'woo-order:'+orderId]);if(original.status!=='posted'||money(limits.receivable,'IRT',true)<amount-paid||money(limits.collected,'IRT')-money(limits.previous,'IRT')<paid){await conn.query('ROLLBACK');return fail('فروش قطعی، دریافت مستند و مانده کافی برای بخش وصول‌شده و وصول‌نشده لازم است.');}}
  const {rows:[date]}=await conn.query("SELECT ($1::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tehran')::date AS local_date",[input.refunds.find(r=>r.id===refundId).payload.date_created_gmt]);
  const period=await conn.query('SELECT id FROM periods WHERE $1::date BETWEEN starts AND ends AND locked=0 FOR SHARE',[date.local_date]);
  if(period.rowCount!==1){await conn.query('ROLLBACK');return fail('دوره مالی باز لازم است.');}
  const journal=randomUUID(),ref='woo-refund:'+orderId+':'+refundId;
- await conn.query("INSERT INTO journals(id,ref,date,period,description,actor,at) VALUES($1,$2,$3,$4,'پیش‌نویس برگشت فروش در برابر دریافتنی وصول‌نشده؛ بدون استرداد وجه یا ورود انبار',$5,now()::text)",[journal,ref,date.local_date,period.rows[0].id,actor]);
- for(const l of p.lines)await conn.query('INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,$2,$3,$4,$5)',[journal,l.account,l.account==='1100'?'woo-order:'+orderId:'',l.debit,l.credit]);
+ await conn.query("INSERT INTO journals(id,ref,date,period,description,actor,at) VALUES($1,$2,$3,$4,$5,$6,now()::text)",[journal,ref,date.local_date,period.rows[0].id,paid>0n?'پیش‌نویس برگشت فروش و بدهی استرداد؛ بدون فرض پرداخت یا ورود انبار':'پیش‌نویس برگشت فروش در برابر دریافتنی وصول‌نشده؛ بدون استرداد وجه یا ورود انبار',actor]);
+ for(const l of p.lines){if(l.account==='1100'&&paid>0n){if(amount>paid)await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'1100',$2,0,$3)",[journal,'woo-order:'+orderId,format(amount-paid)]);await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'2040',$2,0,$3)",[journal,'woo-refund:'+orderId+':'+refundId,format(paid)]);}else await conn.query('INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,$2,$3,$4,$5)',[journal,l.account,l.account==='1100'?'woo-order:'+orderId:'',l.debit,l.credit]);}
  await conn.query('INSERT INTO woo_refund_review_drafts(order_id,refund_id,refund_revision,journal_id,actor) VALUES($1,$2,$3,$4,$5)',[orderId,refundId,revision,journal,actor]);
+ if(paid>0n)await conn.query('INSERT INTO woo_refund_paid_allocation VALUES($1,$2,$3)',[orderId,refundId,format(paid)]);
  await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'woo.refund_draft',$2,'پیشنهاد اصلاح دریافتنی؛ بدون ثبت قطعی')",[actor,ref]);
  await conn.query('COMMIT');return {id:journal,duplicate:false};
  }catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}

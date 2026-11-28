@@ -58,6 +58,7 @@ try{
  const continuousInventoryMigration=await readFile(new URL('018_continuous_inventory.sql',import.meta.url),'utf8');await pool.query(continuousInventoryMigration);
  const purchaseTermsMigration=await readFile(new URL('019_purchase_funding.sql',import.meta.url),'utf8');await pool.query(purchaseTermsMigration);
  const wooCollectionsMigration=await readFile(new URL('020_woo_collections.sql',import.meta.url),'utf8');await pool.query(wooCollectionsMigration);
+ const paidRefundMigration=await readFile(new URL('021_paid_refunds.sql',import.meta.url),'utf8');await pool.query(paidRefundMigration);
  // One version may change, but previously captured evidence is immutable.
  await persistPage(pool,'products',[{id:10,name:'Synthetic',sku:'SYN-10',type:'variable',price:'10.00',date_modified_gmt:'2026-01-01T01:00:00',variations:[11]}]);
  await persistPage(pool,'products',[{id:10,name:'Synthetic',sku:'SYN-10',type:'variable',price:'10.00',date_modified_gmt:'2026-01-01T01:00:00',variations:[11]}]);
@@ -481,6 +482,7 @@ try{
  await assert.rejects(pool.query("UPDATE bank_statement_rows SET amount_toman=1 WHERE reference='BANK-MOVE-IN'"),/immutable record/);
  await pool.query(bankStatementMigration);
  await pool.query(wooCollectionsMigration);
+ await pool.query(paidRefundMigration);
  const [openingGate]=await request('/api/opening-approval');assert.equal(openingGate.ready,false);assert.ok(openingGate.reasons.includes('existing_posted_journals'));
  await request('/api/opening-approval','POST',{digest:openingGate.digest,scope_confirmed:true,valuation_confirmed:true,note:'Synthetic gate check'},409);
  await request('/api/controlled-journal','POST',{id:transferDraft.id,stage:'approved',note:'Synthetic preopening',confirmed:true},409);
@@ -590,6 +592,22 @@ await request('/api/logout','POST',{});await request('/api/dashboard','GET',null
   const bankInput={collection_kind:'bank',order_number:'9002',statement_id:bankRows.rows[0].id,evidence_note:'Synthetic direct bank order receipt',confirmed:true};const bankCollection=await service.recordWooCollection(bankInput,actor);assert.ok(bankCollection.id,JSON.stringify(bankCollection));assert.equal((await service.recordWooCollection(bankInput,actor)).duplicate,true);
   const directDraft=await service.draftWooCollection({id:bankCollection.id},actor);assert.ok(directDraft.id);for(const stage of ['approved','posted'])assert.equal((await service.controlledTransition({id:directDraft.id,stage,note:'Synthetic reconciled bank receipt',confirmed:true},actor)).status,stage);
   const remaining=(await activationPool.query("SELECT sum(l.debit-l.credit)::text balance FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted' AND l.account='1100' AND l.detail='woo-order:9002'")).rows[0];assert.equal(Number(remaining.balance),0);
+  // A previously collected refund first recognizes a liability, then independent bank and gateway disbursements.
+  await persistPage(activationPool,'orders',[{...sale,status:'refunded',refunds:[{id:9003},{id:9005}]}]);await persistPage(activationPool,'refunds',[{id:9005,amount:'200',date_created_gmt:'2026-11-27T10:30:00',line_items:[{id:1,product_id:9001,variation_id:0,quantity:-1,total:'-200',total_tax:'0'}]}],'9002');
+  const paidRefund=(await service.list('refund_review',new URL('https://example.invalid/?id=9005'))).rows[0];assert.equal(paidRefund.status,'receivable_reversal_candidate');
+  const refundDraft=await service.createRefundDraft({order_id:'9002',refund_id:'9005',revision_id:paidRefund.revision_id,paid_refund_confirmed:true,paid_toman:'20'},actor);assert.ok(refundDraft.id,JSON.stringify(refundDraft));
+  for(const stage of ['approved','posted'])assert.equal((await service.controlledTransition({id:refundDraft.id,stage,note:'Synthetic collected refund',confirmed:true},actor)).status,stage);
+  const due=(await service.refundPaymentCandidates('9005')).rows[0];assert.equal(Number(due.remaining_toman),20);
+  const providerRefund={order_id:'9002',refund_id:'9005',account:'1310',reference:'SYN-PROVIDER-REFUND',payment_date:'2026-11-28',source_currency:'IRR',source_amount:'50',evidence_note:'Synthetic provider refund report',confirmed:true};
+  const providerRefundEvidence=await service.recordRefundPayment(providerRefund,actor);assert.ok(providerRefundEvidence.id,JSON.stringify(providerRefundEvidence));assert.equal((await service.recordRefundPayment(providerRefund,actor)).duplicate,true);
+  const providerRefundDraft=await service.draftRefundPayment({id:providerRefundEvidence.id},actor);for(const stage of ['approved','posted'])assert.equal((await service.controlledTransition({id:providerRefundDraft.id,stage,note:'Synthetic provider refund payment',confirmed:true},actor)).status,stage);
+  await service.importBankStatement({account:'1012',currency:'IRT',rows:[{transaction_date:'2026-11-28',reference:'SYN-BANK-REFUND',direction:'debit',amount:'15',description:'Synthetic disbursement'}]},actor);
+  const debitRow=(await service.refundBankRows('SYN-BANK-REFUND')).rows[0];const disbursement=await service.recordRefundPayment({order_id:'9002',refund_id:'9005',statement_id:debitRow.id,evidence_note:'Synthetic actual bank refund',confirmed:true},actor);assert.ok(disbursement.id,JSON.stringify(disbursement));
+  const disbursementDraft=await service.draftRefundPayment({id:disbursement.id},actor);for(const stage of ['approved','posted'])assert.equal((await service.controlledTransition({id:disbursementDraft.id,stage,note:'Synthetic bank refund payment',confirmed:true},actor)).status,stage);
+  const finalRefund=(await activationPool.query("SELECT sum(l.credit-l.debit)::text balance FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted' AND l.account='2040' AND l.detail='woo-refund:9002:9005'")).rows[0];assert.equal(Number(finalRefund.balance),0);
+  const conversion=await service.currencyAudit();assert.equal(conversion.refunds.rows,2);assert.equal(conversion.refunds.mismatches,0);assert.equal(conversion.collections.mismatches,0);assert.equal(conversion.bank.mismatches,0);
+  assert.equal((await service.recordRefundPayment({...providerRefund,reference:'SYN-OVER-REFUND'},actor)).status,409);
+  assert.equal((await service.recordBankMovement({movement_kind:'owner_withdrawal',movement_date:'2026-11-28',bank_account:'1012',reference:'SYN-BANK-REFUND',amount_toman:'15',description:'Synthetic duplicate withdrawal'},actor)).status,409);
   assert.equal((await service.recordBankMovement({movement_kind:'owner_contribution',movement_date:'2026-11-27',bank_account:'1012',reference:'SYN-WOO-BANK',amount_toman:'10',description:'Synthetic duplicate evidence'},actor)).status,409);
   const bulk=await service.importGatewayCollections({account:'1310',source_currency:'IRT',confirmed:true,rows:[{...gatewayInput,reference:'SYN-BULK-ROLLBACK',gross:'1.123456',net:'1',commission:'.123456',commission_tax:'0'}]},actor);assert.equal(bulk.status,400);
   const cashInput={...{supplier_id:'synthetic-supplier',invoice_ref:'SYN-CASH-PURCHASE',received_tehran:'2026-11-28T08:00',total_toman:'21.25',evidence_note:'Synthetic cash purchase',receipt_confirmed:true,items:[{source_kind:'products',external_id:'9001',parent_id:'',quantity:2,value_toman:'21.25'}]},payment_mode:'cash',funding_confirmed:true,initial_payment:{amount_toman:'21.25',bank_account:'1012',payment_ref:'SYN-PURCHASE-CASH',payment_date:'2026-11-28',evidence_note:'Synthetic actual payment',confirmed:true}};
