@@ -129,7 +129,14 @@ try {
       const template=await page.request.get(url+'/api/opening-stock-template');assert.equal(template.status(),200);assert.ok(Array.isArray((await template.json()).rows));
       const download=page.waitForEvent('download');await page.getByRole('button',{name:'دانلود قالب Excel (CSV)',exact:true}).click();
       const csvFile=await download;assert.equal(csvFile.suggestedFilename(),'vesta-opening-stock-template.csv');
-      assert.ok((await readFile(await csvFile.path(),'utf8')).includes('شمارش واقعی'));
+      const header=(await readFile(await csvFile.path(),'utf8')).split(/\r?\n/)[0];assert.ok(header.includes('شمارش واقعی'));
+      assert.equal(await page.getByRole('button',{name:'ثبت گروهی مدارک',exact:true}).isDisabled(),true);
+      // Exercise only the local preview parser. No synthetic upload is submitted to production.
+      const file=page.locator('#content input[type=file]');
+      await file.setInputFiles({name:'preview.csv',mimeType:'text/csv',buffer:Buffer.from(header+'\n"variations:987654:123456","Synthetic","SKU","","۱","۰","۰"')});
+      await page.waitForFunction(()=>!Array.from(document.querySelectorAll('#content button')).find(b=>b.textContent==='ثبت گروهی مدارک').disabled);
+      await file.setInputFiles({name:'preview-invalid.csv',mimeType:'text/csv',buffer:Buffer.from(header+'\n"variations:987654:123456","Synthetic","SKU","","۱","","۰"')});
+      await page.waitForFunction(()=>Array.from(document.querySelectorAll('#content .hint')).some(x=>x.textContent.includes('هر سه تعداد')));
       assert.equal(await page.getByRole('button',{name:'ثبت گروهی مدارک',exact:true}).isDisabled(),true);
     }
     if(view==='financial_readiness'){
