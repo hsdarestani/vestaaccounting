@@ -54,10 +54,17 @@ try {
   const mask=page.locator('#userName, #content .card strong, #content .sync-item b, #content tbody, #content .chart');
   await page.screenshot({path:out+'/vesta-dashboard-redacted.png',animations:'disabled',mask:[mask],maskColor:'#f3d9e7'});
   const controls=await page.locator('#nav button[data-view]').evaluateAll(nodes=>nodes.map(m=>m.dataset.view));
+  assert.equal(await page.locator('#nav > details').count(),9);
+  assert.equal(await page.locator('#nav > details[open]').count(),0);
+  assert.equal(await page.locator('#content .quick-actions button').count(),9);
+  await page.getByRole('button',{name:'این هفته',exact:true}).click();
+  await page.locator('#content .dashboard-welcome').waitFor();
   for(const view of controls){
     assert.match(view,/^[a-z_]+$/);
     phase='view_'+view;
-    await page.locator(`#nav [data-view="${view}"]`).click();
+    const navButton=page.locator(`#nav [data-view="${view}"]`);
+    await navButton.evaluate(btn=>{for(let p=btn.parentElement;p&&p.id!=='nav';p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;});
+    await navButton.click();
     await page.waitForFunction(()=>document.querySelector('#content .panel')||document.querySelector('#content .dashboard-welcome'),null,{timeout:16000});
     assert.equal(await page.locator('#content .error').count(),0,'screen '+view);
     if(view==='opening_costs'){
@@ -137,6 +144,14 @@ try {
       assert.equal(evidence.posting_authorized,false);assert.ok(Array.isArray(evidence.rows));
       const labels={inventory_cost_evidence:'محاسبه بهای تاریخی',expense_evidence:'ثبت مدرک هزینه',purchase_invoice_evidence:'ثبت مدرک فاکتور خرید',supplier_payment_evidence:'ثبت مدرک پرداخت خرید'};
       if(labels[view])await page.getByRole('button',{name:labels[view],exact:true}).waitFor();
+      if(view==='purchase_invoice_evidence'){
+        assert.equal(await page.locator('#content input[name=external_id]').count(),0);
+        await page.getByRole('button',{name:'جستجو',exact:true}).click();
+        await page.waitForFunction(()=>document.querySelector('select[aria-label="انتخاب کالا"] option[value="0"]'));
+        await page.getByLabel('انتخاب کالا',{exact:true}).selectOption('0');
+        await page.locator('#content input[name=value_toman]').fill('۱۲٬۳۴۵٫۵۰');
+        assert.equal(await page.locator('#content input[name=total_toman]').inputValue(),'12345.50');
+      }
       if(view==='refund_review')await page.getByRole('heading',{name:'بررسی استرداد کامل و جزئی',exact:true}).waitFor();
       console.log('browser_'+view+'_verified=true');
     }

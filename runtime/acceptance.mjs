@@ -416,7 +416,12 @@ try{
  const [afterReview]=await request('/api/data/opening_valuation?review_status=non_estimated_cost');
  assert.equal(afterReview.rows[0].value_toman,'198');
  assert.equal(afterReview.preview.find(r=>r.account==='3010').credit,'321.45');
+ const [catalogSearch]=await request('/api/purchase-catalog?q=SYN-11');
+ assert.deepEqual(catalogSearch.rows.map(r=>[r.source_kind,r.external_id,r.parent_id]),[['variations','11','10']]);
+ assert.equal(catalogSearch.rows[0].name,'Changed');
+ const [catalogEmpty]=await request('/api/purchase-catalog?q=nonexistent-product');assert.deepEqual(catalogEmpty.rows,[]);
 await request('/api/logout','POST',{});await request('/api/dashboard','GET',null,401);
+ await request('/api/purchase-catalog','GET',null,401);
  assert.equal((await pool.query("SELECT COALESCE(SUM(debit-credit),0) n FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted'")).rows[0].n,0);
 
  // Repair a new Woo order in raw storage only, without posting a journal.
@@ -432,6 +437,20 @@ await request('/api/logout','POST',{});await request('/api/dashboard','GET',null
  const secondTail=await repairRecentTail(pool,tailSource,{pages:1});
  assert.equal(secondTail[0].inserted,0);
  assert.equal((await pool.query("SELECT COUNT(*) n FROM raw_current WHERE kind='orders'")).rows[0].n,originalOrders+1);
+ assert.equal((await pool.query("SELECT COUNT(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeTail);
+ // Dashboard metrics are exact source activity, excluding non-completed orders;
+ // a mixed or missing currency never becomes a zero or a verified ledger value.
+ await persistPage(pool,'orders',[
+  {id:71001,status:'completed',currency:'IRR',total:'123.45',date_completed_gmt:'2025-06-01T20:45:00'},
+  {id:71002,status:'completed',currency:'IRT',total:'5.05',date_completed_gmt:'2025-06-02T10:00:00'},
+  {id:71003,status:'cancelled',currency:'IRT',total:'900',date_completed_gmt:'2025-06-02T10:00:00'},
+  {id:71004,status:'completed',currency:'USD',total:'10',date_completed_gmt:'2025-06-03T10:00:00'},
+  {id:71005,status:'completed',currency:'IRT',total:'10',date_completed_gmt:'2025-02-31T10:00:00'}
+ ]);
+ const ops=await env.integration.dashboard(new URL('https://example.invalid/?start=2025-06-02&end=2025-06-02&month_start=2025-06-01'));
+ assert.equal(ops.totals.selected.amount,'17.395');assert.equal(ops.totals.selected.orders,2);assert.equal(ops.daily[0].date,'2025-06-02');assert.equal(ops.financial_verified,false);
+ const unknown=await env.integration.dashboard(new URL('https://example.invalid/?start=2025-06-02&end=2025-06-03'));
+ assert.equal(unknown.totals.selected.amount,null);assert.equal(unknown.totals.selected.unknown,1);
  assert.equal((await pool.query("SELECT COUNT(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeTail);
  console.log('PostgreSQL runtime acceptance complete:',checks,'HTTP assertions; immutable revisions, signed webhook replay, bounded sync and posting guard passed');
 }finally{await pool.end();}
