@@ -19,6 +19,7 @@ function browserApp(){
   sourceNav.push(['stock_adjustments','▣','برگشت فیزیکی و اصلاح موجودی'],['woo_journal_queue','↻','صف خودکار اسناد فروش']);
   sourceNav.push(['woo_collections','◉','دریافت سفارش و گزارش درگاه']);
   sourceNav.push(['refund_payments','⇄','پرداخت استرداد مشتری']);
+  const analyticsNav=[['sales_periods','▥','فروش روزانه، ماهانه و سالانه'],['category_profitability','▥','سود دسته کالا'],['expense_breakdown','▥','هزینه‌ها به تفکیک دسته'],['provider_report','▥','گردش و مانده درگاه‌ها'],['channel_profitability','▥','حاشیه سود کانال پرداخت'],['receivable_aging','▥','سن مطالبات'],['payable_aging','▥','سررسید بدهی‌ها'],['tax_summary','▥','گردش مالیات دفتر'],['period_comparison','▥','مقایسه دوره‌های مالی']];sourceNav.push(...analyticsNav);const analyticsModules=analyticsNav.map(x=>x[0]);
   sourceNav.forEach(([key,icon,label])=>names[key]=label);
   const navigation=[
     ['داشبورد','▦',['dashboard']],
@@ -27,9 +28,9 @@ function browserApp(){
     ['هزینه‌ها','◳',['expense_evidence','expenses']],
     ['بانک و صندوق','▰',['bank_evidence','bank_statements','woo_collections','refund_payments','bank','payments','settlement_evidence','gateways','settlements']],
     ['انبار و کالاها','▣',['source_products','source_variations','inventory','movements','stock_adjustments','products']],
-    ['طرف حساب‌ها','♙',['customers','suppliers']],
+    ['طرف حساب‌ها','♙',['customers','suppliers','receivable_aging','payable_aging']],
     ['حسابداری','◫',['journals','accounts','ledger','periods']],
-    ['گزارش‌ها','▥',['reports','balance_sheet','cashflow','trial','profitability']],
+    ['گزارش‌ها','▥',['reports','balance_sheet','cashflow','trial','sales_periods','profitability','category_profitability','expense_breakdown','provider_report','channel_profitability','tax_summary','period_comparison']],
     ['تنظیمات','⚙',['settings','users','integration','source_customers','source_refunds','source_coupons','source_categories','opening','opening_refs','opening_review','opening_costs','opening_valuation','opening_balances','opening_bridge','opening_stock_reconciliation','inventory_cost_evidence','financial_readiness','woo_reconciliation','reconciliation','audit']]
   ];
   const everydayLabels={source_orders:'سفارش‌های فروشگاه',sales:'فاکتورهای دفتر',refund_review:'برگشت و استرداد',sales_proposals:'بررسی اسناد فروش',purchase_invoice_evidence:'ثبت فاکتور خرید',supplier_payment_evidence:'پرداخت خرید',expense_evidence:'ثبت هزینه',settlement_evidence:'ثبت تسویه درگاه',source_products:'کالاهای فروشگاه',source_variations:'تنوع کالاها'};
@@ -101,6 +102,8 @@ function browserApp(){
   cols.purchase_invoice_evidence.splice(4,0,'payment_mode','initial_paid_toman','outstanding_toman','due_date');
   cols.woo_collections=['collection_date','order_id','collection_kind','account','reference','gross_toman','net_toman','commission_toman','commission_tax_toman','draft_ref','journal_status','evidence_note'];
   cols.refund_payments=['payment_date','order_id','refund_id','account','reference','amount_toman','draft_ref','journal_status','evidence_note'];
+  Object.assign(cols,{sales_periods:['period_label','orders','returns','revenue','cogs','gross_profit_toman','operating_expense_toman','net_profit_toman'],category_profitability:['category','revenue','cogs','margin'],expense_breakdown:['account','category_name','debit','credit','amount_toman'],provider_report:['title','gross_toman','commission_toman','commission_tax_toman','net_toman','settled_toman','settlement_fee_toman','refund_toman','balance'],channel_profitability:['title','orders','revenue','cogs','fee_toman','margin'],receivable_aging:['party_name','reference','invoice_date','age_days','due_date','aging_bucket','outstanding_toman'],payable_aging:['party_name','reference','invoice_date','age_days','due_date','aging_bucket','outstanding_toman'],tax_summary:['period_label','starts','ends','debit','credit','tax_balance_toman'],period_comparison:['period_label','starts','ends','locked','revenue','cogs','operating_expense_toman','net_profit_toman']});
+  Object.assign(labels,{period_label:'دوره',orders:'تعداد فروش',returns:'تعداد برگشت',gross_profit_toman:'سود ناخالص',net_profit_toman:'سود خالص',operating_expense_toman:'هزینه غیر از بهای کالا',settled_toman:'تسویه واقعی',settlement_fee_toman:'کارمزد ثبت‌شده در تسویه',invoice_date:'تاریخ ایجاد بدهی',age_days:'سن رکورد (روز)',aging_bucket:'وضعیت سررسید',tax_balance_toman:'خالص گردش مالیات'});
   Object.assign(labels,{collection_date:'تاریخ دریافت',collection_kind:'روش دریافت',commission_toman:'کارمزد',commission_tax_toman:'مالیات کارمزد',payment_mode:'نوع خرید',initial_paid_toman:'پرداخت اولیه',due_date:'سررسید'});
   Object.assign(labels,{payment_mode:'روش پرداخت',initial_paid_toman:'پرداخت اولیه (تومان)',due_date:'سررسید بدهی'});
   Object.assign(labels,{purchase_date:'تاریخ دریافت کالا',purchase_items:'اقلام دریافت‌شده',purchase_status:'وضعیت سند',total_toman:'مبلغ کل (تومان)'});
@@ -147,11 +150,15 @@ function browserApp(){
   monetaryFields.push('initial_paid_toman');dateFields.push('due_date');
   monetaryFields.push('commission_toman','commission_tax_toman');dateFields.push('collection_date');financialReports.push('woo_collections');paginatedReports.push('woo_collections');
   financialReports.push('refund_payments');paginatedReports.push('refund_payments');
+  financialReports.push(...analyticsModules);paginatedReports.push(...analyticsModules.filter(m=>!['provider_report','channel_profitability'].includes(m)));monetaryFields.push('gross_profit_toman','net_profit_toman','operating_expense_toman','settled_toman','settlement_fee_toman','tax_balance_toman');dateFields.push('invoice_date');
   Object.assign(labels,{price:'قیمت (تومان)',currency:'واحد مبلغ',discount_total:'تخفیف (تومان)',shipping_total:'ارسال (تومان)',total_tax:'مالیات (تومان)',amount:'مبلغ / درصد تخفیف',discount_tax:'مالیات تخفیف (تومان)'});
   const moneyText=v=>v===null||v===undefined?'نامشخص':fmt(v)+' تومان';
   const columnTitle=k=>{const label=labels[k]||k;return (moneyFields.has(k)||monetaryFields.includes(k))&&!['expected','observed','amount'].includes(k)&&!label.includes('تومان')?label+' (تومان)':label;};
   const reviewModules=['inventory_cost_evidence','financial_readiness','opening_stock_reconciliation','opening_bridge','opening_costs','opening_balances','opening_valuation','woo_journal_queue'];
   function display(k,v){
+    if(k==='aging_bucket')return ({unknown_due:'سررسید نامشخص',not_due:'نرسیده', '1_30':'۱ تا ۳۰ روز', '31_60':'۳۱ تا ۶۰ روز', '61_90':'۶۱ تا ۹۰ روز',over_90:'بیش از ۹۰ روز'})[v]||'—';
+    if(k==='period_label')return String(v??'').replace(/[0-9]/g,d=>'۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+    if(['age_days','orders','returns'].includes(k))return v==null?'—':fmt(v);
     if(k==='payment_mode')return ({credit:'نسیه',cash:'نقدی',mixed:'نقد و نسیه'})[v]||'—';
     if(k==='collection_kind')return ({bank:'واریز بانکی',gateway:'درگاه'})[v]||'—';
     if(k==='due_date')return v?jalali(v):'—';
@@ -415,12 +422,13 @@ function browserApp(){
     ];
   }
   async function moduleView(m,selected){
-    let filter={start:'',end:'',account:m==='bank_statements'?'':selected||'1010',page:0,detail:'',id:m==='opening_costs'?(selected||''):'',review_status:'',match_status:''};
+    let filter={start:'',end:'',account:m==='bank_statements'?'':selected||'1010',page:0,detail:'',id:m==='opening_costs'?(selected||''):'',review_status:'',match_status:'',granularity:m==='sales_periods'?'monthly':''};
     const load=(query=filter)=>api('/data/'+m+'?'+new URLSearchParams(Object.entries(query).filter(([k,v])=>v!=='')));
     let d=await load(),shown=[];const result=el('div'),search=el('input'),toolbar=el('div',undefined,'toolbar'),chartCards=el('div');
     const columns=cols[m]||['code','title','debit','credit','balance'];search.placeholder=m==='opening_costs'?'شناسه دقیق ووکامرس':'جست‌وجوی این صفحه…';
     if(m==='opening_costs')search.value=filter.id;
     toolbar.append(add(el('label','جست‌وجو'),search));
+    if(m==='sales_periods'){const period=el('select');period.setAttribute('aria-label','تفکیک دوره فروش');for(const [v,t] of [['daily','روزانه'],['monthly','ماهانه'],['annual','سالانه']]){const o=el('option',t);o.value=v;period.append(o);}period.value='monthly';period.addEventListener('change',()=>{filter.granularity=period.value;filter.page=0;refresh();});toolbar.append(add(el('label','تفکیک دوره'),period));}
     if(m==='bank_statements'){const accounts=el('select'),states=el('select');for(const [v,t] of [['','همه بانک‌ها'],...opts.accounts.filter(a=>['1010','1012','1013'].includes(a.code)).map(a=>[a.code,a.title])]){const o=el('option',t);o.value=v;accounts.append(o);}for(const v of ['','matched','exact_pending','review','conflict','unmatched']){const o=el('option',v?display('match_status',v):'همه وضعیت‌ها');o.value=v;states.append(o);}accounts.addEventListener('change',()=>{filter.account=accounts.value;filter.page=0;refresh();});states.addEventListener('change',()=>{filter.match_status=states.value;filter.page=0;refresh();});toolbar.append(add(el('label','حساب بانک'),accounts),add(el('label','وضعیت تطبیق'),states));}
     if(m==='opening_costs'){
       const find=()=>{filter.id=search.value.trim();filter.page=0;return refresh();};
@@ -437,7 +445,7 @@ function browserApp(){
     }
     async function refresh(){try{d=await load();draw();}catch(e){msg(e.message,true);}}
     const dateKeys=(m==='opening_review'||reviewModules.includes(m)||m==='inventory')?[]:
-      ['balance_sheet','customers','suppliers'].includes(m)?['end']:['start','end'];
+      ['balance_sheet','customers','suppliers','receivable_aging','payable_aging'].includes(m)?['end']:['start','end'];
     const dateInputs={};
     const applyDates=async ()=>{
       const dates={};
@@ -621,10 +629,11 @@ function browserApp(){
     const marginColumns=['local_date','margin_status','count','merchandise_net_toman','reference_cost_toman','indicative_margin_toman'];
     const marginNames={estimated_reference:'دارای بهای تخمینی',non_estimated_reference:'بهای مرجع غیرتخمینی',status_review:'وضعیت سفارش نیازمند بررسی',refund_evidence_missing:'مدرک استرداد نامشخص',refund_review:'دارای استرداد',currency_review:'ارز نامشخص',line_or_cost_review:'اقلام یا بهای نامشخص'};
     function marginRows(data){return (data.margin_review||[]).map(r=>({...r,margin_status:marginNames[r.margin_status]||r.margin_status}));}
-    const ledgerPending=mode==='source'&&!d.posting_authorized&&['reports','balance_sheet','cashflow','trial','bank','gateways','customers','suppliers','profitability','inventory'].includes(m);
+    const ledgerPending=mode==='source'&&!d.posting_authorized&&['reports','balance_sheet','cashflow','trial','bank','gateways','customers','suppliers','profitability','inventory',...analyticsModules].includes(m);
     const known=v=>ledgerPending?null:v;
     const safeLedgerRows=rows=>ledgerPending?rows.map(r=>{const values={...r};for(const k of ['debit','credit','balance','value','quantity','revenue','cogs','margin'])if(Object.hasOwn(values,k))values[k]=null;return values;}):rows;
     function draw(){const rows=d.rows||[];shown=selectRows(safeLedgerRows(rows));result.replaceChildren(table(shown,columns,m),el('p',fmt(shown.length)+' ردیف · صفحه '+fmt(filter.page+1),'muted'));if(ledgerPending)result.prepend(el('p','مانده‌ها و مبالغ مالی تا تأیید افتتاحیه نامشخص‌اند؛ داده خالی به معنی صفر نیست.','hint'));
+      if(analyticsModules.includes(m)){const help={sales_periods:'فروش خالص، بهای تمام‌شده و هزینه‌های دفتر قطعی به تفکیک تقویم شمسی. درآمد شامل ارسال و برگشت‌های ثبت‌شده است.',category_profitability:'سود کالا بر اساس فروش و برگشت قطعی و بهای تاریخی. دسته اصلی فعلی ووکامرس برای گروه‌بندی استفاده شده و تاریخ تغییر دسته تأیید نشده است.',expense_breakdown:'تنها اقلام هزینه دفتر قطعی؛ هزینه‌های بدون دسته مستند بر اساس حساب دفتر گروه‌بندی می‌شوند.',provider_report:'ناخالص و خالص دریافت مستند، کارمزد و مالیات کارمزد، تسویه و استرداد قطعی؛ مانده تا تاریخ پایان گزارش.',channel_profitability:'فقط سفارش‌های کاملاً وصول‌شده از یک کانال و بدون برگشت یا تعدیل قابل انتساب؛ حاشیه پس از بهای کالا و کارمزد، پیش از هزینه‌های مشترک.',receivable_aging:'مانده واقعی حساب دریافتنی، سن از تاریخ اولین ثبت؛ نبود سررسید به معنی معوق شدن نیست.',payable_aging:'مانده هر فاکتور قطعی پس از پرداخت‌های قطعی و مانده افتتاحیه یا تخصیص‌نیافته. سررسید نامشخص جداگانه نشان داده می‌شود.',tax_summary:'گردش ثبت‌شده حساب مالیات در دفتر؛ گزارش اظهارنامه یا تأیید انطباق قانونی نیست.',period_comparison:'مقایسه درآمد و هزینه قطعی دوره‌های انتخاب‌شده؛ دوره ناقص را به عنوان دوره کامل مقایسه نکنید.'};chartCards.replaceChildren(panel('مبنای گزارش',help[m],...(m==='channel_profitability'?[grid(card('سفارش‌های قابل انتساب',d.attributed_orders??null,'✓','','سفارش'),card('کل فروش قطعی',d.total_orders??null,'▧','','سفارش'))]:[])));}
       if(m==='bank_evidence'){
         const candidates=role==='owner'?shown.filter(r=>r.movement_status==='draft_candidate').map(r=>button('پیش‌نویس گردش '+r.reference,async()=>{await api('/bank-movement','POST',{action:'draft',id:r.id});await refresh();msg('پیش‌نویس متوازن ذخیره شد؛ ثبت قطعی نشده است.');})):[];
         chartCards.replaceChildren(panel('گردش‌های دارای مدرک','دریافت‌ها و پرداخت‌های مستند، نه مانده قطعی حساب‌ها.',...candidates));
