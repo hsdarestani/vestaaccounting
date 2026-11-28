@@ -26,3 +26,12 @@ Phase one: PR #37 merged, PostgreSQL 197 HTTP assertions passed (including resto
 - Category and payment status drive expense form fields. Existing accounting evidence without a category remains explicitly uncategorized.
 - Authorized owner can create customers/suppliers using a human-readable form with automatic internal reference. This is not automatic WooCommerce identity matching or opening balance posting.
 - Continue to label partial source dashboard values as incomplete when dates or source refresh are missing.
+
+Phase one deployed and verified: release b0c106beb421e287e734b9ae51f685c13a2afb1f, run 46136804959, 51 authenticated screens passed. Readiness at verification: 12 missing balance bridge rows, 5,686 missing stock reconciliation rows, 147 unknown captured quantities, 1,072 cost estimates (91 priority), 3 unresolved exceptions. Phase two PR #38 merged after 206 PostgreSQL HTTP assertions passed; production run must be verified.
+
+## Phase three: bulk opening stock reconciliation
+
+- Export a spreadsheet-ready CSV template for all unreconciled snapshot items; source identities are prefilled and reference quantities are explicitly informational.
+- Import filled physical count, receipts and issues in exact non-negative integers with dry preview, explicit common observation time/evidence and completeness confirmation. Blank rows are skipped, not interpreted as zero.
+- Each request of up to 100 rows is database-atomic and locks capture identities; replay of identical rows is harmless, conflicting existing evidence requires separate review, and a failed request cannot partly save its rows. Earlier successful batches are shown transparently and can be retried without duplicate evidence.
+- No synthetic production records, store writes or journal posting.

@@ -126,6 +126,11 @@ try {
       assert.equal(evidence.posting_authorized,false);assert.ok(evidence.capture&&evidence.rows.length>0);
       await page.getByRole('button',{name:'ثبت مدرک موجودی',exact:true}).waitFor();
       console.log('browser_opening_stock_reconciliation_verified=true');
+      const template=await page.request.get(url+'/api/opening-stock-template');assert.equal(template.status(),200);assert.ok(Array.isArray((await template.json()).rows));
+      const download=page.waitForEvent('download');await page.getByRole('button',{name:'دانلود قالب Excel (CSV)',exact:true}).click();
+      const csvFile=await download;assert.equal(csvFile.suggestedFilename(),'vesta-opening-stock-template.csv');
+      assert.ok((await readFile(await csvFile.path(),'utf8')).includes('شمارش واقعی'));
+      assert.equal(await page.getByRole('button',{name:'ثبت گروهی مدارک',exact:true}).isDisabled(),true);
     }
     if(view==='financial_readiness'){
       const response=await page.request.get(url+'/api/data/financial_readiness');
