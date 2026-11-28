@@ -22,9 +22,14 @@ fi
 for filesystem in "$root" "$docker_root"; do
   read -r total available < <(df -Pm "$filesystem" | awk 'NR==2{print $2,$4}')
   if [[ "$mode" == app-only ]]; then
-    reserve=$(((total+9)/10))
-    if (( reserve < 8192 )); then reserve=8192; fi
+    # App-only updates keep the live database and rollback image in place.
+    # Preserve a 6 GiB or 5% filesystem reserve, whichever is larger,
+    # in addition to the conservative image and database working allowance.
+    # Adapter installs retain their original higher capacity requirement.
+    reserve=$(((total+19)/20))
+    if (( reserve < 6144 )); then reserve=6144; fi
     required=$((reserve+working_mib))
+    printf 'upgrade_capacity_detail reserve_mib=%s working_mib=%s\n' "$reserve" "$working_mib"
   fi
   printf 'upgrade_storage mode=%s available_mib=%s required_mib=%s\n' "$mode" "$available" "$required"
   (( available >= required ))

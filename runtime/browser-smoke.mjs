@@ -131,6 +131,15 @@ try {
       console.log('browser_financial_readiness_verified=true');
       console.log('financial_readiness_counts='+JSON.stringify(evidence.coverage));
     }
+    if(['inventory_cost_evidence','expense_evidence','purchase_invoice_evidence','supplier_payment_evidence','refund_review'].includes(view)){
+      const response=await page.request.get(url+'/api/data/'+view);
+      assert.equal(response.status(),200);const evidence=await response.json();
+      assert.equal(evidence.posting_authorized,false);assert.ok(Array.isArray(evidence.rows));
+      const labels={inventory_cost_evidence:'محاسبه بهای تاریخی',expense_evidence:'ثبت مدرک هزینه',purchase_invoice_evidence:'ثبت مدرک فاکتور خرید',supplier_payment_evidence:'ثبت مدرک پرداخت خرید'};
+      if(labels[view])await page.getByRole('button',{name:labels[view],exact:true}).waitFor();
+      if(view==='refund_review')await page.getByRole('heading',{name:'بررسی استرداد کامل و جزئی',exact:true}).waitFor();
+      console.log('browser_'+view+'_verified=true');
+    }
     if(view==='woo_reconciliation'){
       const activity=await page.request.get(url+'/api/data/woo_reconciliation');
       assert.equal(activity.status(),200);
