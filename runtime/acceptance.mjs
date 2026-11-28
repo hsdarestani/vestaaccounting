@@ -32,6 +32,8 @@ try{
  await pool.query(purchaseMigration);
  const supplierPaymentMigration=await readFile(new URL('012_supplier_payment_evidence.sql',import.meta.url),'utf8');
  await pool.query(supplierPaymentMigration);
+ const refundMigration=await readFile(new URL('013_refund_review.sql',import.meta.url),'utf8');
+ await pool.query(refundMigration);
  const plan=(await pool.query('SELECT * FROM accounting_cutover WHERE id=1')).rows[0];
  assert.equal(new Date(plan.effective_at_utc).toISOString(),'2026-11-23T20:30:00.000Z');
  assert.equal(plan.timezone,'Asia/Tehran');
@@ -294,6 +296,39 @@ try{
  await persistPage(pool,'refunds',[{id:587,amount:'5',date_created_gmt:'2026-11-26T11:30:00'}],'586');
  const [staleRevenue]=await request('/api/data/sales_proposals?id=586&start=2026-11-24&end=2026-11-26');
  assert.equal(staleRevenue.rows[0].draft_status,'draft_stale');
+ // Merchandise refunds require full refund evidence and an unchanged original revenue draft.
+ const returnOrder={...wholeOrder,id:590,total:'110',total_tax:'10',shipping_total:'0',shipping_tax:'0',shipping_lines:[],line_items:[{...wholeOrder.line_items[0],total_tax:'10'}]};
+ await persistPage(pool,'orders',[returnOrder]);
+ const [originalReturnSale]=await request('/api/data/sales_proposals?id=590&start=2026-11-24&end=2026-11-26');
+ await request('/api/operate','POST',{kind:'woo_revenue_draft',external_id:'590',revision_id:originalReturnSale.rows[0].revision_id},201);
+ const partRefund={id:591,amount:'55',date_created_gmt:'2026-11-25T10:30:00',line_items:[{id:91,product_id:10,variation_id:11,quantity:-1,total:'-50',total_tax:'-5'}]};
+ await persistPage(pool,'orders',[{...returnOrder,refunds:[{id:591,total:'-55'}]}]);
+ await persistPage(pool,'refunds',[partRefund],'590');
+ const [partialReview]=await request('/api/data/refund_review?id=591');
+ const partial=partialReview.rows[0];
+ assert.equal(partial.refund_extent,'partial_cumulative');assert.equal(partial.draft_status,'receivable_reversal_candidate');
+ assert.deepEqual(partial.lines,[{account:'4040',debit:'50',credit:'0'},{account:'2100',debit:'5',credit:'0'},{account:'1100',debit:'0',credit:'55'}]);
+ const refundInput={kind:'woo_refund_draft',order_id:'590',refund_id:'591',revision_id:partial.revision_id,uncollected_receivable_confirmed:true};
+ await request('/api/operate','POST',{...refundInput,uncollected_receivable_confirmed:false},400);
+ const postedBeforeRefund=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
+ const [refundDraft]=await request('/api/operate','POST',refundInput,201);
+ const [repeatRefundDraft]=await request('/api/operate','POST',refundInput,201);
+ assert.equal(repeatRefundDraft.id,refundDraft.id);assert.equal(repeatRefundDraft.duplicate,true);
+ assert.deepEqual((await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[refundDraft.id])).rows,[{account:'1100',debit:0,credit:55},{account:'2100',debit:5,credit:0},{account:'4040',debit:50,credit:0}]);
+ await persistPage(pool,'orders',[{...returnOrder,status:'refunded',refunds:[{id:591},{id:592}]}]);
+ const [missingRefund]=await request('/api/data/refund_review?id=591');
+ assert.equal(missingRefund.rows[0].draft_status,'draft_stale');assert.ok(missingRefund.rows[0].reasons.includes('refund_set_review'));
+ await persistPage(pool,'refunds',[{...partRefund,id:592}],'590');
+ const [fullRefund]=await request('/api/data/refund_review?id=592');
+ assert.equal(fullRefund.rows[0].refund_extent,'full_cumulative');assert.equal(fullRefund.rows[0].draft_status,'receivable_reversal_candidate');
+ await persistPage(pool,'orders',[{...returnOrder,status:'refunded',refunds:[{id:591},{id:592},{id:593}]}]);
+ await persistPage(pool,'refunds',[{...partRefund,id:593}],'590');
+ const [overRefund]=await request('/api/data/refund_review?id=593');
+ assert.ok(overRefund.rows[0].reasons.includes('over_refund'));assert.equal(overRefund.rows[0].status,'review_required');
+ await request('/api/operate','POST',{...refundInput,refund_id:'593',revision_id:overRefund.rows[0].revision_id},409);
+ assert.equal((await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeRefund);
+ await pool.query(refundMigration);
+
  await request('/api/operate','POST',inputDraft,409);
  
   
