@@ -170,6 +170,7 @@ try {
         assert.equal(await page.locator('#content input[name=initial_amount]').inputValue(),'12345.50');
         await page.locator('#content select[name=payment_mode]').selectOption('mixed');
         assert.equal(await page.locator('#content input[name=due_date]').isVisible(),true);
+        await page.getByLabel('تفکیک تخفیف، حمل، هزینه تهیه و مالیات (مبلغ هر ردیف پیش از تخفیف کلی)',{exact:true}).check();await page.locator('#content input[name=discount_toman]').fill('100');await page.locator('#content input[name=shipping_toman]').fill('50.123456');await page.locator('#content input[name=recoverable_tax_toman]').fill('1.5');assert.equal(await page.locator('#content input[name=total_toman]').inputValue(),'12297.123456');
       }
       if(view==='expense_evidence'){
         assert.ok(evidence.categories.length>=17);
@@ -193,6 +194,7 @@ try {
       const r=await page.request.get(url+'/api/data/refund_payments');assert.equal(r.status(),200);assert.ok(Array.isArray((await r.json()).rows));
       await page.getByRole('button',{name:'ثبت مدرک پرداخت استرداد',exact:true}).waitFor();await page.locator('select[name=method]').selectOption('gateway');await page.locator('select[name=source_currency]').selectOption('IRR');await page.locator('input[name=source_amount]').fill('12500000');await page.getByText('مبلغ پرداخت: ۱٬۲۵۰٬۰۰۰ تومان',{exact:true}).waitFor();console.log('browser_refund_payment_toman_verified=true');
     }
+    if(view==='purchase_returns'){const r=await page.request.get(url+'/api/data/purchase_returns');assert.equal(r.status(),200);assert.ok(Array.isArray((await r.json()).rows));await page.getByRole('button',{name:'ثبت مدرک برگشت خرید',exact:true}).waitFor();console.log('browser_purchase_return_form_verified=true');}
     if(['sales_periods','category_profitability','expense_breakdown','provider_report','channel_profitability','receivable_aging','payable_aging','tax_summary','period_comparison'].includes(view)){
       const r=await page.request.get(url+'/api/data/'+view);assert.equal(r.status(),200);const d=await r.json();assert.equal(d.verified,false);assert.deepEqual(d.rows,[]);await page.getByRole('heading',{name:'مبنای گزارش',exact:true}).waitFor();await page.getByRole('button',{name:'Excel',exact:true}).waitFor();await page.getByRole('button',{name:'چاپ / PDF',exact:true}).waitFor();if(view==='sales_periods'){await page.getByLabel('تفکیک دوره فروش').selectOption('annual');const annual=await page.request.get(url+'/api/data/sales_periods?granularity=annual');assert.equal((await annual.json()).granularity,'annual');}console.log('browser_'+view+'_verified=true');
     }
