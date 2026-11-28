@@ -53,6 +53,7 @@ export async function recordExpenseEvidence(pool,b,actor){
   if(supplier&&!(await conn.query("SELECT 1 FROM parties WHERE id=$1 AND kind='supplier'",[supplier])).rowCount){await conn.query('ROLLBACK');return err('تأمین‌کننده معتبر نیست.');}
   // Serialize competing uses of a bank statement reference across evidence modules.
   if(payment)await conn.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[f+':'+payment]);
+  if(payment&&(await conn.query('SELECT 1 FROM bank_movement_references WHERE account=$1 AND reference=$2',[f,payment])).rowCount){await conn.query('ROLLBACK');return err('این مرجع در گردش بانک و صندوق ثبت شده است.',409);}
   if(payment&&(await conn.query('SELECT 1 FROM gateway_settlement_evidence WHERE bank_account=$1 AND bank_ref=$2',[f,payment])).rowCount){await conn.query('ROLLBACK');return err('این مرجع بانک در تسویه درگاه ثبت شده است.',409);}
   await conn.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['invoice:'+invoice]);
   if((await conn.query('SELECT 1 FROM purchase_invoice_evidence WHERE invoice_ref=$1 AND ($2::text IS NULL OR supplier_id=$2)',[invoice,supplier])).rowCount){await conn.query('ROLLBACK');return err('این فاکتور قبلاً به عنوان خرید کالا ثبت شده است.',409);}

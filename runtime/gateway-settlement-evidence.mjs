@@ -49,6 +49,7 @@ export async function recordSettlement(pool,b,actor){
     $1::date BETWEEN (effective_at_utc AT TIME ZONE 'Asia/Tehran')::date AND (now() AT TIME ZONE 'Asia/Tehran')::date`,[date]);
   if(!bounds.rowCount){await client.query('ROLLBACK');return invalid('تاریخ خارج از بازه حسابداری است.');}
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[bank+':'+bankRef]);
+  if((await client.query('SELECT 1 FROM bank_movement_references WHERE account=$1 AND reference=$2',[bank,bankRef])).rowCount){await client.query('ROLLBACK');return invalid('این مرجع در گردش بانک و صندوق ثبت شده است.',409);}
   if((await client.query('SELECT 1 FROM operating_expense_evidence WHERE funding_account=$1 AND payment_ref=$2',[bank,bankRef])).rowCount){await client.query('ROLLBACK');return invalid('این مرجع بانک در هزینه عملیاتی ثبت شده است.',409);}
   if((await client.query('SELECT 1 FROM supplier_payment_evidence WHERE bank_account=$1 AND payment_ref=$2',[bank,bankRef])).rowCount){await client.query('ROLLBACK');return invalid('مرجع بانک در پرداخت تأمین‌کننده ثبت شده است.',409);}
   const args=[gateway,bank,gatewayRef,bankRef,date,decimal(gross),decimal(net),decimal(fee),note,basis];

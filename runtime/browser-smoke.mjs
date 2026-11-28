@@ -206,6 +206,13 @@ try {
       console.log('browser_authenticated_sync_totals_verified=true');
     }
     if(view==='customers'||view==='suppliers')await page.getByRole('button',{name:view==='customers'?'ثبت مشتری جدید':'ثبت تأمین‌کننده جدید',exact:true}).waitFor();
+    if(view==='bank_evidence'){
+      const r=await page.request.get(url+'/api/data/bank_evidence');assert.equal(r.status(),200);assert.equal((await r.json()).posting_authorized,false);
+      await page.getByRole('button',{name:'ثبت مدرک گردش',exact:true}).waitFor();
+      await page.locator('select[name=movement_kind]').selectOption('customer_receipt');
+      assert.equal(await page.locator('select[name=other_bank_account]').isVisible(),false);assert.equal(await page.locator('select[name=party_id]').getAttribute('required'),'');
+      await page.locator('select[name=movement_kind]').selectOption('transfer');assert.equal(await page.locator('select[name=other_bank_account]').isVisible(),true);
+    }
     if(['reports','balance_sheet','cashflow'].includes(view))assert.equal(await page.locator('#content .card strong').filter({hasText:'نامشخص'}).count(),4);
   }
   phase='logout';
