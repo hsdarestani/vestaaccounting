@@ -35,3 +35,4 @@ Phase one deployed and verified: release b0c106beb421e287e734b9ae51f685c13a2afb1
 - Import filled physical count, receipts and issues in exact non-negative integers with dry preview, explicit common observation time/evidence and completeness confirmation. Blank rows are skipped, not interpreted as zero.
 - Each request of up to 100 rows is database-atomic and locks capture identities; replay of identical rows is harmless, conflicting existing evidence requires separate review, and a failed request cannot partly save its rows. Earlier successful batches are shown transparently and can be retried without duplicate evidence.
 - No synthetic production records, store writes or journal posting.
+- Prevent unverified ledger balances and accounting report totals from appearing as zero in finance views or their standard exports; raw evidence reports remain available with their existing labels.

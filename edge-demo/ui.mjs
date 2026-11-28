@@ -482,7 +482,10 @@ function browserApp(){
     const marginColumns=['local_date','margin_status','count','merchandise_net_toman','reference_cost_toman','indicative_margin_toman'];
     const marginNames={estimated_reference:'دارای بهای تخمینی',non_estimated_reference:'بهای مرجع غیرتخمینی',status_review:'وضعیت سفارش نیازمند بررسی',refund_evidence_missing:'مدرک استرداد نامشخص',refund_review:'دارای استرداد',currency_review:'ارز نامشخص',line_or_cost_review:'اقلام یا بهای نامشخص'};
     function marginRows(data){return (data.margin_review||[]).map(r=>({...r,margin_status:marginNames[r.margin_status]||r.margin_status}));}
-    function draw(){const rows=d.rows||[];shown=selectRows(rows);result.replaceChildren(table(shown,columns,m),el('p',fmt(shown.length)+' ردیف · صفحه '+fmt(filter.page+1),'muted'));
+    const ledgerPending=mode==='source'&&['reports','balance_sheet','cashflow','trial','bank','gateways','customers','suppliers','profitability','inventory'].includes(m);
+    const known=v=>ledgerPending?null:v;
+    const safeLedgerRows=rows=>ledgerPending?rows.map(r=>{const values={...r};for(const k of ['debit','credit','balance','value','quantity','revenue','cogs','margin'])if(Object.hasOwn(values,k))values[k]=null;return values;}):rows;
+    function draw(){const rows=d.rows||[];shown=selectRows(safeLedgerRows(rows));result.replaceChildren(table(shown,columns,m),el('p',fmt(shown.length)+' ردیف · صفحه '+fmt(filter.page+1),'muted'));if(ledgerPending)result.prepend(el('p','مانده‌ها و مبالغ مالی تا تأیید افتتاحیه نامشخص‌اند؛ داده خالی به معنی صفر نیست.','hint'));
       if(m==='refund_review'){
         const candidates=role==='owner'?shown.filter(r=>r.draft_status==='receivable_reversal_candidate').map(r=>button('پیش‌نویس برگشت '+r.refund_id,async()=>{
           if(!window.confirm('فقط اگر مبلغ مربوط به این استرداد هنوز در حساب دریافتنی وصول نشده و هیچ پرداخت یا استرداد وجه ثبت نشده است، تأیید کنید. این عمل فقط پیش‌نویس اصلاح دریافتنی می‌سازد.'))return;
@@ -537,14 +540,14 @@ function browserApp(){
         chartCards.replaceChildren(panel('جمع مدارک تسویه','این جمع، مانده تأییدشده درگاه یا بانک نیست. فقط تسویه‌های دارای مدرک ثبت‌شده را نشان می‌دهد.',
           table(d.summary||[],summaryCols),button('Excel جمع تسویه',()=>excel(d.summary||[],summaryCols)),...candidates));
       }
-      if(m==='reports'&&d.sums)chartCards.replaceChildren(grid(card('درآمد خالص دفتر',d.sums.revenue,'⇧'),card('بهای تمام‌شده',d.cogs,'▣'),card('سود ناخالص',d.gross_profit,'↗','green'),card('سود خالص',d.net_profit,'▥','green')),panel('صورت سود و زیان آزمایشی','درآمد و هزینه‌های دوره؛ گزارش رسمی یا تأیید حسابدار نیست.'));
-      if(m==='balance_sheet'&&d.sums)chartCards.replaceChildren(grid(card('دارایی',d.sums.asset,'◉'),card('بدهی',d.sums.liability,'⇆'),card('حقوق مالکانه + سود انباشته',d.sums.equity+d.net_profit,'▰'),card('اختلاف تراز',d.sums.asset-d.sums.liability-d.sums.equity-d.net_profit,'⇄')),panel('ترازنامه آزمایشی تجمعی','مانده از آغاز دفتر تا تاریخ پایان؛ سود دوره‌های باز در حقوق مالکانه منظور شده است.'));
+      if(m==='reports'&&d.sums)chartCards.replaceChildren(grid(card('درآمد خالص دفتر',known(d.sums.revenue),'⇧'),card('بهای تمام‌شده',known(d.cogs),'▣'),card('سود ناخالص',known(d.gross_profit),'↗','green'),card('سود خالص',known(d.net_profit),'▥','green')),panel('صورت سود و زیان',ledgerPending?'پس از تأیید افتتاحیه و ثبت قطعی قابل گزارش خواهد بود.':'درآمد و هزینه‌های دوره؛ داده آزمایشی.'));
+      if(m==='balance_sheet'&&d.sums)chartCards.replaceChildren(grid(card('دارایی',known(d.sums.asset),'◉'),card('بدهی',known(d.sums.liability),'⇆'),card('حقوق مالکانه + سود انباشته',known(d.sums.equity+d.net_profit),'▰'),card('اختلاف تراز',known(d.sums.asset-d.sums.liability-d.sums.equity-d.net_profit),'⇄')),panel('ترازنامه تجمعی',ledgerPending?'دارایی‌ها و بدهی‌ها هنوز تأیید نشده‌اند.':'مانده از آغاز دفتر تا تاریخ پایان؛ سود دوره‌های باز در حقوق مالکانه منظور شده است.'));
       if(m==='woo_reconciliation')chartCards.replaceChildren(panel('جمع گردش انتخاب‌شده','سفارش و پرداخت می‌توانند مربوط به یک شناسه باشند و با هم جمع نمی‌شوند. تاریخ پرداخت ووکامرس نشانه وصول بانکی نیست.',
         table(d.summary,['event_kind','payment_method','count','amount_unknown','amount_toman']),
         button('Excel جمع گردش',()=>excel(d.summary,['event_kind','payment_method','count','amount_unknown','amount_toman']))),
         panel('برآورد حاشیه سود کالاهای سفارش پرداخت‌شده','فقط اقلام دارای تطبیق کامل و قیمت مرجع فعلی؛ بدون استرداد، هزینه ارسال، مالیات، کارمزد و هزینه عملیاتی. این گزارش سود قطعی یا بهای تاریخی نیست. مبلغ سفارش‌های مستثنا محاسبه نشده است.',
           table(marginRows(d),marginColumns),button('Excel برآورد سود',()=>excel(marginRows(d),marginColumns))));
-      if(m==='cashflow')chartCards.replaceChildren(grid(card('مانده آغاز',d.opening,'▰'),card('وجه ورودی',rows.reduce((s,r)=>s+r.debit,0),'↗'),card('وجه خروجی',rows.reduce((s,r)=>s+r.credit,0),'↘'),card('مانده پایان',d.closing,'▰','green')),panel('گردش نقدی مستقیم','تجمیع بر اساس نوع مدرک؛ اسناد دستی بدون طبقه‌بندی رسمی نمایش داده می‌شوند.'));
+      if(m==='cashflow')chartCards.replaceChildren(grid(card('مانده آغاز',known(d.opening),'▰'),card('وجه ورودی',known(rows.reduce((s,r)=>s+r.debit,0)),'↗'),card('وجه خروجی',known(rows.reduce((s,r)=>s+r.credit,0)),'↘'),card('مانده پایان',known(d.closing),'▰','green')),panel('گردش نقدی مستقیم',ledgerPending?'گردش مستند بانکی و دفتر تأییدشده لازم است.':'تجمیع بر اساس نوع مدرک؛ اسناد دستی بدون طبقه‌بندی رسمی نمایش داده می‌شوند.'));
     }
     if(m!=='opening_costs')search.addEventListener('input',draw);
     toolbar.append(button('CSV',()=>csv(shown,columns)));
@@ -556,7 +559,7 @@ function browserApp(){
         for(let page=0;page<=1000;page++){
           const batch=(await load({...filter,page})).rows;
           rows.push(...batch);
-          if(batch.length<100){excel(selectRows(rows),columns);return;}
+          if(batch.length<100){excel(selectRows(safeLedgerRows(rows)),columns);return;}
         }
         throw Error('گزارش بیش از حد بزرگ است. بازه یا فیلتر را محدود کنید.');
       }),button('چاپ / PDF',()=>window.print()));

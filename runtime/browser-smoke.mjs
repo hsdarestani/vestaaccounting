@@ -199,6 +199,7 @@ try {
       console.log('browser_authenticated_sync_totals_verified=true');
     }
     if(view==='customers'||view==='suppliers')await page.getByRole('button',{name:view==='customers'?'ثبت مشتری جدید':'ثبت تأمین‌کننده جدید',exact:true}).waitFor();
+    if(['reports','balance_sheet','cashflow'].includes(view))assert.equal(await page.locator('#content .card strong').filter({hasText:'نامشخص'}).count(),4);
   }
   phase='logout';
   await page.locator('#logout').click();
