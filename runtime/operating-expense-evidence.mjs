@@ -42,6 +42,8 @@ export async function recordExpenseEvidence(pool,b,actor){
   // Serialize competing uses of a bank statement reference across evidence modules.
   if(payment)await conn.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[f+':'+payment]);
   if(payment&&(await conn.query('SELECT 1 FROM gateway_settlement_evidence WHERE bank_account=$1 AND bank_ref=$2',[f,payment])).rowCount){await conn.query('ROLLBACK');return err('این مرجع بانک در تسویه درگاه ثبت شده است.',409);}
+  await conn.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['invoice:'+invoice]);
+  if((await conn.query('SELECT 1 FROM purchase_invoice_evidence WHERE invoice_ref=$1 AND ($2::text IS NULL OR supplier_id=$2)',[invoice,supplier])).rowCount){await conn.query('ROLLBACK');return err('این فاکتور قبلاً به عنوان خرید کالا ثبت شده است.',409);}
   const values=[date,a,f,supplier,invoice,payment,decimal(amount),note];
   const {rows}=await conn.query(`INSERT INTO operating_expense_evidence(id,expense_date,expense_account,funding_account,supplier_id,invoice_ref,payment_ref,amount_toman,description,actor)
    VALUES($9,$1,$2,$3,$4,$5,$6,$7,$8,$10) ON CONFLICT DO NOTHING RETURNING id`,[...values,randomUUID(),actor]);
