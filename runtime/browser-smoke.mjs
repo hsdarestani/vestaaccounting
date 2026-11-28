@@ -93,7 +93,7 @@ try {
       assert.ok(valuation.capture&&valuation.preview.length>0);
       const units=v=>{const [whole,fraction='']=v.split('.');return BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0'));};
       assert.equal(valuation.preview.reduce((sum,line)=>sum+units(line.debit)-units(line.credit),0n),0n);
-      await page.getByRole('heading',{name:'پیش‌نویس تطبیق افتتاحیه',exact:true}).waitFor();
+      await page.getByRole('heading',{name:'پیش‌نویس تطبیق افتتاحیه',exact:true}).waitFor({timeout:30000});
       console.log('browser_opening_costs_balances_and_balanced_review_verified=true');
       console.log('opening_stock_row_counts='+JSON.stringify(Object.fromEntries(valuation.counts.map(row=>[row.review_status,row.count]))));
       console.log('opening_woo_activity_review='+JSON.stringify(valuation.activity));
@@ -166,6 +166,10 @@ try {
         await page.getByLabel('انتخاب کالا',{exact:true}).selectOption('0');
         await page.locator('#content input[name=value_toman]').fill('۱۲٬۳۴۵٫۵۰');
         assert.equal(await page.locator('#content input[name=total_toman]').inputValue(),'12345.50');
+        await page.locator('#content select[name=payment_mode]').selectOption('cash');
+        assert.equal(await page.locator('#content input[name=initial_amount]').inputValue(),'12345.50');
+        await page.locator('#content select[name=payment_mode]').selectOption('mixed');
+        assert.equal(await page.locator('#content input[name=due_date]').isVisible(),true);
       }
       if(view==='expense_evidence'){
         assert.ok(evidence.categories.length>=17);
@@ -177,6 +181,13 @@ try {
       }
       if(view==='refund_review')await page.getByRole('heading',{name:'بررسی استرداد کامل و جزئی',exact:true}).waitFor();
       console.log('browser_'+view+'_verified=true');
+    }
+    if(view==='woo_collections'){
+      const response=await page.request.get(url+'/api/data/woo_collections');assert.equal(response.status(),200);assert.ok(Array.isArray((await response.json()).rows));
+      await page.getByRole('button',{name:'ثبت مدرک دریافت سفارش',exact:true}).waitFor();
+      await page.locator('select[name=collection_kind]').selectOption('gateway');await page.locator('input[name=gross]').fill('100');await page.locator('input[name=net]').fill('90');await page.locator('input[name=commission]').fill('8');await page.locator('input[name=commission_tax]').fill('2');await page.locator('form').filter({has:page.locator('select[name=collection_kind]')}).locator('select[name=source_currency]').selectOption('IRR');
+      await page.getByText('ناخالص ۱۰ تومان · خالص ۹ تومان · کارمزد و مالیات ۱ تومان',{exact:true}).waitFor();
+      console.log('browser_woo_collection_toman_verified=true');
     }
     if(view==='woo_reconciliation'){
       const activity=await page.request.get(url+'/api/data/woo_reconciliation');

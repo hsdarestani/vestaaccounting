@@ -31,19 +31,16 @@ export async function reviewOpeningInput(pool,module,url){
  const conn=await pool.connect();
  try{
   await conn.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-  const rows=(await conn.query(`
-   SELECT source_kind,external_id,parent_id,name,stock_quantity,stock_status,unit_cost_toman,
+  const {rows:[valuation]}=await conn.query(`WITH stock AS MATERIALIZED (
+   SELECT source_kind,external_id,parent_id,name,stock_quantity,stock_status,unit_cost_toman::text,
     cost_status,priority_review,review_status,
-    CASE WHEN review_status IN('estimated_cost','non_estimated_cost')
-     THEN (stock_quantity::numeric*unit_cost_toman)::text END AS value_toman
+    CASE WHEN review_status IN('estimated_cost','non_estimated_cost') THEN (stock_quantity::numeric*unit_cost_toman)::text END AS value_toman
    FROM opening_stock_cost_review
-   WHERE ($1::text IS NULL OR review_status=$1) ORDER BY source_kind,external_id::bigint,parent_id
-   LIMIT $2 OFFSET $3`,[url.searchParams.get('review_status'),pageSize,page*pageSize])).rows;
-  const counts=(await conn.query(`
-   SELECT review_status,count(*) AS count,
-    coalesce(sum(stock_quantity::numeric*unit_cost_toman)
-      FILTER(WHERE review_status IN('estimated_cost','non_estimated_cost')),0)::text AS value_toman
-   FROM opening_stock_cost_review GROUP BY review_status ORDER BY review_status`)).rows;
+  ), selected AS (SELECT * FROM stock WHERE ($1::text IS NULL OR review_status=$1) ORDER BY source_kind,external_id::bigint,parent_id LIMIT $2 OFFSET $3),
+  totals AS (SELECT review_status,count(*)::int AS count,coalesce(sum(value_toman::numeric),0)::text AS value_toman FROM stock GROUP BY review_status)
+  SELECT coalesce((SELECT jsonb_agg(selected ORDER BY source_kind,external_id::bigint,parent_id) FROM selected),'[]'::jsonb) rows,
+   coalesce((SELECT jsonb_agg(totals ORDER BY review_status) FROM totals),'[]'::jsonb) counts`,[url.searchParams.get('review_status'),pageSize,page*pageSize]);
+  const {rows,counts}=valuation;
   const capture=(await conn.query('SELECT cutover_at,observed_at FROM opening_capture WHERE id=1')).rows[0]||null;
   const activity=(await conn.query(`
    WITH bounds AS (
@@ -65,16 +62,15 @@ export async function reviewOpeningInput(pool,module,url){
     FROM opening_input_balances_v1 b JOIN opening_balance_account_links l USING(evidence_date,line_key)
     JOIN accounts a ON a.code=l.account WHERE b.evidence_date='2026-11-26' AND b.amount_toman>0
     UNION ALL
-    SELECT '1200','موجودی کالا',review_status,NULL,sum(stock_quantity::numeric*unit_cost_toman),0
-    FROM opening_stock_cost_review WHERE review_status IN('estimated_cost','non_estimated_cost')
-    GROUP BY review_status
+    SELECT '1200','موجودی کالا',review_status,NULL,value_toman,0
+    FROM jsonb_to_recordset($1::jsonb) q(review_status text,value_toman numeric) WHERE review_status IN('estimated_cost','non_estimated_cost')
    ), offset_total AS (SELECT coalesce(sum(debit-credit),0) net FROM lines),
    balanced AS (
     SELECT * FROM lines
     UNION ALL SELECT '3010','مانده محاسباتی افتتاحیه','نیازمند تطبیق',NULL,
      greatest(-net,0),greatest(net,0) FROM offset_total WHERE net<>0
    )
-   SELECT account,title,detail,party,debit::text,credit::text FROM balanced ORDER BY account,detail`)).rows;
+   SELECT account,title,detail,party,debit::text,credit::text FROM balanced ORDER BY account,detail`,[JSON.stringify(counts)])).rows;
   await conn.query('COMMIT');
   return {rows,counts,capture,activity,preview,status:'review',posting_authorized:false};
  }catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}

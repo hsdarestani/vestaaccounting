@@ -15,11 +15,13 @@ export async function purchaseInvoiceList(pool,url){
   SELECT e.id,e.supplier_id,p.name AS supplier_name,e.invoice_ref,
    (e.received_at AT TIME ZONE 'Asia/Tehran')::date AS purchase_date,
    to_char(e.received_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_utc,
-   e.total_toman::text AS total_toman,e.items,e.evidence_note,j.ref AS draft_ref,
+   e.total_toman::text AS total_toman,e.items,e.evidence_note,j.ref AS draft_ref,coalesce(t.payment_mode,'credit') payment_mode,t.due_date,coalesce(t.initial_paid_toman,0)::text initial_paid_toman,
+   coalesce((SELECT sum(amount_toman) FROM supplier_payment_evidence sp WHERE sp.purchase_id=e.id),0)::text allocated_toman,
+   (e.total_toman-coalesce((SELECT sum(amount_toman) FROM supplier_payment_evidence sp WHERE sp.purchase_id=e.id),0))::text outstanding_toman,
    CASE WHEN d.journal_id IS NOT NULL THEN 'draft_created'
     WHEN NOT EXISTS(SELECT 1 FROM periods p WHERE (e.received_at AT TIME ZONE 'Asia/Tehran')::date BETWEEN p.starts AND p.ends AND p.locked=0) THEN 'period_required'
     ELSE 'draft_candidate' END AS purchase_status
-  FROM purchase_invoice_evidence e JOIN parties p ON p.id=e.supplier_id
+  FROM purchase_invoice_evidence e JOIN parties p ON p.id=e.supplier_id LEFT JOIN purchase_invoice_terms t ON t.invoice_id=e.id
   LEFT JOIN purchase_invoice_drafts d ON d.evidence_id=e.id LEFT JOIN journals j ON j.id=d.journal_id
   WHERE (e.received_at AT TIME ZONE 'Asia/Tehran')::date BETWEEN $1::date AND $2::date
  ), sums AS (
@@ -33,7 +35,13 @@ export async function purchaseInvoiceList(pool,url){
 }
 export async function recordPurchaseInvoice(pool,b,actor){
  const supplier=clean(b.supplier_id,120),invoice=clean(b.invoice_ref,120),note=clean(b.evidence_note,500),at=b.received_tehran,total=cents(b.total_toman);
- if(!supplier||!invoice||!note||!stamp(at)||total===null||total<=0n||total>100000000000000n||b.receipt_confirmed!==true||b.credit_purchase_confirmed!==true||!Array.isArray(b.items)||!b.items.length||b.items.length>200)return fail('مدرک خرید نسیه، دریافت کالا، مبلغ کل و اقلام معتبر لازم است.');
+ const mode=b.payment_mode||'credit',due=b.due_date||null,payment=b.initial_payment||null;
+ if(!supplier||!invoice||!note||!stamp(at)||total===null||total<=0n||total>100000000000000n||b.receipt_confirmed!==true||!['credit','cash','mixed'].includes(mode)||(b.funding_confirmed!==true&&!(mode==='credit'&&b.credit_purchase_confirmed===true))||!Array.isArray(b.items)||!b.items.length||b.items.length>200)return fail('مدرک خرید، دریافت کالا، روش پرداخت، مبلغ کل و اقلام معتبر لازم است.');
+ if(due&&(!dateValid(due)||due<at.slice(0,10)||mode==='cash'))return fail('سررسید معتبر برای مانده بدهی لازم است.');
+ let paid=0n,bank=null,paymentRef=null,paymentNote=null,paymentDate=null;
+ if(mode!=='credit'){paid=cents(payment?.amount_toman);bank=payment?.bank_account;paymentRef=clean(payment?.payment_ref,120);paymentNote=clean(payment?.evidence_note,500);paymentDate=payment?.payment_date;
+  if(paid===null||paid<=0n||(mode==='cash'?paid!==total:paid>=total)||!['1010','1011','1012','1013'].includes(bank)||!paymentRef||!paymentNote||!dateValid(paymentDate)||paymentDate<at.slice(0,10)||payment?.confirmed!==true)return fail('مبلغ پرداخت واقعی، حساب، تاریخ و مرجع معتبر لازم است.');
+ }else if(payment)return fail('در حالت نسیه اولیه، مدرک پرداخت اولیه ارسال نشود.');
  const items=[],seen=new Set();let sum=0n;
  for(const item of b.items){
   if(!item)return fail('ردیف فاکتور معتبر نیست.');
@@ -50,6 +58,7 @@ export async function recordPurchaseInvoice(pool,b,actor){
   const bounds=await conn.query(`SELECT 1 FROM accounting_cutover WHERE id=1 AND ($1::timestamp AT TIME ZONE 'Asia/Tehran') BETWEEN effective_at_utc AND now()`,[at]);
   if(!bounds.rowCount){await conn.query('ROLLBACK');return fail('زمان دریافت خارج از بازه حسابداری است.');}
   if(!(await conn.query("SELECT 1 FROM parties WHERE id=$1 AND kind='supplier'",[supplier])).rowCount){await conn.query('ROLLBACK');return fail('تأمین‌کننده معتبر نیست.');}
+  if(paid>0n){await conn.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[bank+':'+paymentRef]);const {rows:[date]}=await conn.query("SELECT $1::date<=(now() AT TIME ZONE 'Asia/Tehran')::date valid",[paymentDate]);if(!date.valid){await conn.query('ROLLBACK');return fail('تاریخ پرداخت آینده مجاز نیست.');}}
   await conn.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['invoice:'+invoice]);
   if((await conn.query('SELECT 1 FROM operating_expense_evidence WHERE invoice_ref=$1 AND (supplier_id=$2 OR supplier_id IS NULL)',[invoice,supplier])).rowCount){await conn.query('ROLLBACK');return fail('این فاکتور قبلاً به عنوان هزینه ثبت شده است.',409);}
   const {rows:[matching]}=await conn.query(`
@@ -65,11 +74,15 @@ export async function recordPurchaseInvoice(pool,b,actor){
   if(!saved.rowCount){
    const prior=await conn.query(`SELECT id FROM purchase_invoice_evidence WHERE supplier_id=$1 AND invoice_ref=$2
     AND received_at=($3::timestamp AT TIME ZONE 'Asia/Tehran') AND total_toman=$4 AND items=$5::jsonb AND evidence_note=$6`,args);
-   await conn.query('COMMIT');return prior.rowCount?{id:prior.rows[0].id,duplicate:true}:fail('فاکتور با اطلاعات متفاوت قبلاً ثبت شده است.',409);
+   if(!prior.rowCount){await conn.query('ROLLBACK');return fail('فاکتور با اطلاعات متفاوت قبلاً ثبت شده است.',409);}const id=prior.rows[0].id;
+   const {rows:[terms]}=await conn.query(`SELECT coalesce(t.payment_mode,'credit')=$2 AND t.due_date IS NOT DISTINCT FROM $3::date AND coalesce(t.initial_paid_toman,0)=$4::numeric AND p.bank_account IS NOT DISTINCT FROM $5 AND p.payment_ref IS NOT DISTINCT FROM $6 AND p.payment_date IS NOT DISTINCT FROM $7::date AND p.evidence_note IS NOT DISTINCT FROM $8 identical,t.initial_payment_id FROM purchase_invoice_evidence e LEFT JOIN purchase_invoice_terms t ON t.invoice_id=e.id LEFT JOIN supplier_payment_evidence p ON p.id=t.initial_payment_id WHERE e.id=$1`,[id,mode,due,decimal(paid),bank,paymentRef,paymentDate,paymentNote]);
+   await conn.query('COMMIT');return terms.identical?{id,duplicate:true,payment_id:terms.initial_payment_id}:fail('روش پرداخت یا مدرک اولیه فاکتور قبلی متفاوت است.',409);
   }
   const id=saved.rows[0].id;
-  await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'purchase.invoice_evidence',$2,'مدرک خرید نسیه و دریافت کالا؛ بدون ثبت قطعی')",[actor,id]);
-  await conn.query('COMMIT');return {id,duplicate:false};
+  let paymentId=null;if(paid>0n){const used=await conn.query(`SELECT 1 FROM gateway_settlement_evidence WHERE bank_account=$1 AND bank_ref=$2 UNION ALL SELECT 1 FROM operating_expense_evidence WHERE funding_account=$1 AND payment_ref=$2 UNION ALL SELECT 1 FROM bank_movement_references WHERE account=$1 AND reference=$2 UNION ALL SELECT 1 FROM supplier_payment_evidence WHERE bank_account=$1 AND payment_ref=$2 UNION ALL SELECT 1 FROM woo_collection_evidence WHERE collection_kind='bank' AND account=$1 AND reference=$2`,[bank,paymentRef]);if(used.rowCount){await conn.query('ROLLBACK');return fail('مرجع پرداخت در بخش دیگری ثبت شده است؛ فاکتور ذخیره نشد.',409);}paymentId=randomUUID();await conn.query('INSERT INTO supplier_payment_evidence(id,purchase_id,payment_date,bank_account,payment_ref,amount_toman,evidence_note,actor) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[paymentId,id,paymentDate,bank,paymentRef,decimal(paid),paymentNote,actor]);await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'supplier.payment_evidence',$2,'مدرک پرداخت اولیه همراه فاکتور؛ بدون ثبت قطعی')",[actor,paymentId]);}
+  await conn.query('INSERT INTO purchase_invoice_terms(invoice_id,payment_mode,due_date,initial_payment_id,initial_paid_toman) VALUES($1,$2,$3,$4,$5)',[id,mode,due,paymentId,decimal(paid)]);
+  await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'purchase.invoice_evidence',$2,'مدرک خرید و دریافت کالا؛ بدون ثبت قطعی')",[actor,id]);
+  await conn.query('COMMIT');return {id,duplicate:false,payment_id:paymentId};
  }catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}
 }
 export async function draftPurchaseInvoice(pool,b,actor){
