@@ -3,9 +3,9 @@ const banks=['1010','1012','1013'],fail=(error,status=400)=>({error,status});
 const clean=(x,max)=>typeof x==='string'&&x.trim()&&x.trim().length<=max?x.trim():null;
 const dateValid=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&new Date(v+'T00:00:00Z').toJSON()?.slice(0,10)===v;
 export function exactStatementAmount(value,currency){
- if(typeof value!=='string'||!/^\d{1,14}(\.\d{1,2})?$/.test(value)||!['IRT','IRR'].includes(currency))return null;
- const [a,b='']=value.split('.');let n=BigInt(a)*100n+BigInt(b.padEnd(2,'0'));if(currency==='IRR'){if(n%10n!==0n)return null;n/=10n;}
- if(n<=0n||n>100000000000000n)return null;return String(n/100n)+'.'+String(n%100n).padStart(2,'0');
+ if(typeof value!=='string'||!/^\d{1,14}(\.\d{1,6})?$/.test(value)||!['IRT','IRR'].includes(currency))return null;
+ const [a,b='']=value.split('.');let n=BigInt(a)*1000000n+BigInt(b.padEnd(6,'0'));if(currency==='IRR'){if(n%10n!==0n)return null;n/=10n;}
+ if(n<=0n||n>1000000000000000000n)return null;const fraction=String(n%1000000n).padStart(6,'0').replace(/0+$/,'').padEnd(2,'0');return String(n/1000000n)+'.'+fraction;
 }
 async function lock(conn,account){await conn.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['bank-statement:'+account]);}
 async function matchExact(conn,account,actor){

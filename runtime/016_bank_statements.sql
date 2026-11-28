@@ -26,7 +26,8 @@ DROP TRIGGER IF EXISTS bank_statement_guard ON bank_statement_rows;
 CREATE TRIGGER bank_statement_guard BEFORE UPDATE OR DELETE ON bank_statement_rows FOR EACH ROW EXECUTE FUNCTION runtime_immutable();
 DROP TRIGGER IF EXISTS bank_statement_link_guard ON bank_statement_links;
 CREATE TRIGGER bank_statement_link_guard BEFORE UPDATE OR DELETE ON bank_statement_links FOR EACH ROW EXECUTE FUNCTION runtime_immutable();
-CREATE OR REPLACE VIEW bank_statement_candidates AS
+DROP VIEW IF EXISTS bank_statement_candidates;
+CREATE VIEW bank_statement_candidates AS
  SELECT 'settlement:'||id||':'||bank_account AS source_key,'settlement' AS source_kind,bank_account AS account,bank_ref AS reference,settlement_date AS transaction_date,'credit'::text AS direction,net_toman AS amount_toman FROM gateway_settlement_evidence
  UNION ALL SELECT 'expense:'||id||':'||funding_account,'expense',funding_account,payment_ref,expense_date,'debit',amount_toman FROM operating_expense_evidence WHERE funding_account IN ('1010','1012','1013')
  UNION ALL SELECT 'supplier:'||id||':'||bank_account,'supplier_payment',bank_account,payment_ref,payment_date,'debit',amount_toman FROM supplier_payment_evidence WHERE bank_account IN ('1010','1012','1013')
