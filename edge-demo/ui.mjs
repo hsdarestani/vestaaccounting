@@ -296,16 +296,17 @@ function browserApp(){
       const events=el('textarea');events.name='events';events.rows=6;events.dir='ltr';events.placeholder='UTC,kind,reference,quantity,value_toman\n2026-11-24T09:00:00Z,purchase,INV-1,3,150\n2026-11-25T10:00:00Z,sale,ORDER-1,2,';
       const check=el('input');check.type='checkbox';check.required=true;
       const label=el('label','تمام گردش تا زمان شمارش مستند است و ترتیب ردیف‌های هم‌زمان را کنترل کرده‌ام.');label.prepend(check);
-      const submit=el('button','محاسبه بهای تاریخی','primary');submit.type='submit';form.append(fg,add(el('label','گردش CSV، زمان UTC و ارقام انگلیسی؛ هر ردیف یک گردش'),events),label,submit);
+      const autoPurchase=el('input');autoPurchase.type='checkbox';autoPurchase.checked=true;const autoLabel=el('label','خریدهای ثبت‌شده را مستقیماً از فاکتورهای خرید دریافت کن؛ همه خریدهای این بازه ثبت شده‌اند.');autoLabel.prepend(autoPurchase);
+      const submit=el('button','محاسبه بهای تاریخی','primary');submit.type='submit';form.append(fg,autoLabel,add(el('label','گردش CSV، زمان UTC و ارقام انگلیسی؛ هر ردیف یک گردش'),events),label,submit);
       form.addEventListener('submit',async e=>{e.preventDefault();submit.disabled=true;try{
         const b=Object.fromEntries(new FormData(form));
         const lines=b.events.trim().split(/\r?\n/).filter(Boolean);
         if(lines[0]==='UTC,kind,reference,quantity,value_toman')lines.shift();
         const movements=lines.map(line=>{const parts=line.split(',').map(x=>x.trim());if(parts.length!==5||!/^\d+$/.test(parts[3]))throw Error('قالب گردش باید پنج ستون داشته باشد.');const [at,kind,ref,q,value]=parts;return {at,kind,ref,quantity:Number(q),value_toman:value};});
-        await operate({kind:'inventory_cost_evidence',source_kind:b.source_kind,external_id:b.external_id.trim(),parent_id:b.parent_id.trim(),reference:b.reference,events:movements,coverage_confirmed:check.checked});
+        await operate({kind:'inventory_cost_evidence',source_kind:b.source_kind,external_id:b.external_id.trim(),parent_id:b.parent_id.trim(),reference:b.reference,events:movements,use_registered_purchases:autoPurchase.checked,coverage_confirmed:check.checked});
         await go(m);msg('محاسبه بر اساس گردش مستند ذخیره شد؛ سند قطعی نیست.');
       }catch(err){msg(err.message,true);}finally{submit.disabled=false;}});
-      return panel('محاسبه میانگین موزون تاریخی','فقط بازه افتتاحیه تا شمارش ثبت‌شده. نوع گردش: purchase, sale, return_in, return_out, damage, adjustment_in, adjustment_out. ورودی‌ها ارزش کل مستند می‌خواهند؛ ارزش خروج را خالی بگذارید. برگشت و اصلاحات نیازمند بررسی مالی جداگانه هستند.',form);
+      return panel('محاسبه میانگین موزون تاریخی','فقط بازه افتتاحیه تا شمارش ثبت‌شده. در حالت دریافت خودکار فاکتورها، خرید را دوباره در CSV وارد نکنید. نوع گردش دستی: sale, return_in, return_out, damage, adjustment_in, adjustment_out؛ در حالت دستی purchase نیز مجاز است. ورودی‌ها ارزش کل مستند می‌خواهند؛ ارزش خروج را خالی بگذارید. برگشت و اصلاحات نیازمند بررسی مالی جداگانه هستند.',form);
     }
     function stockReconciliationForm(){
       const form=el('form'),fg=el('div',undefined,'forms');

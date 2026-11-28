@@ -27,6 +27,20 @@ export function replayInventory({openingQuantity,openingValue,receivedQuantity,i
  if(incoming!==BigInt(receivedQuantity)||outgoing!==BigInt(issuedQuantity)||q!==BigInt(observedQuantity))return fail('جمع ورود، خروج یا مانده با مدرک شمارش تطابق ندارد.',409);
  return {rows,opening_value_toman:openingValue,ending_quantity:q.toString(),ending_value_toman:v.toString(),sales_cogs_toman:cogs.toString(),other_out_value_toman:other.toString(),posting_authorized:false};
 }
+// Invoices are immutable; use their exact line values and actual receipt times.
+// The input remains a review calculation, never a stock write or posted journal.
+async function registeredPurchaseEvents(conn,k,id,p,cutover,observedAt){
+ const {rows}=await conn.query(`
+ SELECT to_char(e.received_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
+ 'purchase:'||e.id AS ref,(i->>'quantity')::bigint AS quantity,
+ trim_scale((i->>'value_toman')::numeric)::text AS value_toman
+ FROM purchase_invoice_evidence e CROSS JOIN LATERAL jsonb_array_elements(e.items) i
+ WHERE e.received_at BETWEEN $4::timestamptz AND $5::timestamptz
+ AND e.items @> jsonb_build_array(jsonb_build_object('source_kind',$1::text,'external_id',$2::text,'parent_id',$3::text))
+ AND i->>'source_kind'=$1 AND i->>'external_id'=$2 AND i->>'parent_id'=$3
+ ORDER BY e.received_at,e.id LIMIT 5001`,[k,id,p,cutover,observedAt]);
+ return rows.map(r=>({...r,kind:'purchase'}));
+}
 export async function inventoryCostList(pool,url){
  const id=url.searchParams.get('id')||'';
  if(id&&!idPattern.test(id))return {rows:[],posting_authorized:false};
@@ -38,11 +52,12 @@ export async function inventoryCostList(pool,url){
  CASE WHEN s.reconciliation_status NOT IN ('zero_reviewed','non_estimated_reviewed','estimated_reviewed') THEN 'opening_required'
  WHEN e.id IS NULL THEN 'movement_required'
  WHEN e.stock_revision<>s.reconciliation_revision OR e.cost_revision<>coalesce(c.revision,0) THEN 'stale_evidence'
+ WHEN e.evidence->>'purchase_source'='registered_invoices' AND (e.evidence->>'registered_purchase_count')::bigint<>(SELECT count(*) FROM purchase_invoice_evidence p WHERE p.received_at BETWEEN a.effective_at_utc AND s.observed_at AND p.items @> jsonb_build_array(jsonb_build_object('source_kind',s.source_kind,'external_id',s.external_id,'parent_id',s.parent_id))) THEN 'stale_evidence'
  ELSE 'calculated_review' END AS cost_review_status
- FROM opening_stock_reconciled_review s
+ FROM opening_stock_reconciled_review s CROSS JOIN accounting_cutover a
  LEFT JOIN opening_purchase_cost_review c ON c.external_id::text=s.external_id AND c.source_kind=s.source_kind
  LEFT JOIN LATERAL(SELECT * FROM inventory_cost_evidence e WHERE e.source_kind=s.source_kind AND e.external_id=s.external_id AND e.parent_id=s.parent_id ORDER BY e.id DESC LIMIT 1)e ON true
- WHERE ($1='' OR s.external_id=$1) ORDER BY s.source_kind,s.external_id::bigint,s.parent_id LIMIT 100 OFFSET $2
+ WHERE a.id=1 AND ($1='' OR s.external_id=$1) ORDER BY s.source_kind,s.external_id::bigint,s.parent_id LIMIT 100 OFFSET $2
  `,[id,page*100]);
  return {rows,posting_authorized:false};
 }
@@ -62,9 +77,19 @@ export async function recordInventoryCost(pool,b,actor){
    WHERE a.id=1 AND s.source_kind=$1 AND s.external_id=$2 AND s.parent_id=$3
   `.replace('SELECT s.*,','SELECT s.reconciliation_revision,s.opening_quantity,s.observed_quantity,s.received_quantity,s.issued_quantity,s.reconciliation_status,s.cost_status,'),[k,id,p]);
   if(!s||!['zero_reviewed','non_estimated_reviewed','estimated_reviewed'].includes(s.reconciliation_status)){await conn.query('ROLLBACK');return fail('ابتدا موجودی و بهای افتتاحیه را تطبیق دهید.',409);}
-  const result=replayInventory({openingQuantity:s.opening_quantity,openingValue:s.value_exact,receivedQuantity:s.received_quantity,issuedQuantity:s.issued_quantity,observedQuantity:s.observed_quantity,cutover:s.cutover,observedAt:s.observed_at_utc,events});
+  let movements=events,registered=[];
+  if(b.use_registered_purchases===true){
+   if(events.some(e=>!e||e.kind==='purchase'||String(e.ref||'').startsWith('purchase:'))){await conn.query('ROLLBACK');return fail('در حالت اتصال فاکتورها، ورود خرید دستی مجاز نیست.');}
+   registered=await registeredPurchaseEvents(conn,k,id,p,s.cutover,s.observed_at_utc);
+   if(registered.some(e=>!money(e.value_toman))){await conn.query('ROLLBACK');return fail('حداقل یک ردیف خرید اعشاری است؛ ارزش گرد نمی‌شود.',409);}
+   const times=new Set(registered.map(e=>e.at));
+   if(events.some(e=>times.has(e.at))){await conn.query('ROLLBACK');return fail('زمان خرید و گردش دیگر یکسان است؛ ترتیب واقعی باید بررسی شود.',409);}
+   if(events.some((e,i)=>i>0&&e.at<events[i-1].at)){await conn.query('ROLLBACK');return fail('گردش دستی باید به ترتیب زمانی باشد.');}
+   movements=[...registered,...events].sort((a,b)=>String(a.at).localeCompare(String(b.at)));
+  }
+  const result=replayInventory({openingQuantity:s.opening_quantity,openingValue:s.value_exact,receivedQuantity:s.received_quantity,issuedQuantity:s.issued_quantity,observedQuantity:s.observed_quantity,cutover:s.cutover,observedAt:s.observed_at_utc,events:movements});
   if(result.error){await conn.query('ROLLBACK');return result;}
-  const evidence={reference:reference.trim(),events};
+  const evidence=b.use_registered_purchases===true?{reference:reference.trim(),events:movements,purchase_source:'registered_invoices',registered_purchase_count:registered.length}:{reference:reference.trim(),events};
   const fingerprint=createHash('sha256').update(JSON.stringify([k,id,p,s.reconciliation_revision,s.cost_revision,s.value_exact,evidence])).digest('hex');
   const inserted=await conn.query(`INSERT INTO inventory_cost_evidence(stock_revision,cost_revision,source_kind,external_id,parent_id,opening_value_toman,evidence,result,fingerprint,actor)
    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10) ON CONFLICT(fingerprint) DO NOTHING RETURNING id`,
