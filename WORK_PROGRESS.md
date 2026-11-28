@@ -36,3 +36,9 @@ Phase one deployed and verified: release b0c106beb421e287e734b9ae51f685c13a2afb1
 - Each request of up to 100 rows is database-atomic and locks capture identities; replay of identical rows is harmless, conflicting existing evidence requires separate review, and a failed request cannot partly save its rows. Earlier successful batches are shown transparently and can be retried without duplicate evidence.
 - No synthetic production records, store writes or journal posting.
 - Prevent unverified ledger balances and accounting report totals from appearing as zero in finance views or their standard exports; raw evidence reports remain available with their existing labels.
+
+## Phase four: bank and cash movement evidence
+
+- Add actual-source evidence forms for bank/cash transfers (both statement references), customer receipts/deposits, owner contributions/withdrawals and loan receipts; exact Toman amounts, Jalali dates, human-readable account/customer selectors.
+- Create balanced, idempotent drafts under open-period and precision controls. Existing expense, settlement and supplier payment flows share the same bank-reference lock and duplicate checks; no inference of money received from WooCommerce status.
+- Account mapping is additive and fails safely if existing account codes conflict. Posting remains gated pending opening reconciliation and owner/accountant approval.

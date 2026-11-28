@@ -45,7 +45,8 @@ export async function recordSupplierPayment(pool,b,actor){
  const prior=await conn.query('SELECT id,purchase_id=$1 AND payment_date=$2 AND amount_toman=$5 AND evidence_note=$6 AS identical FROM supplier_payment_evidence WHERE bank_account=$3 AND payment_ref=$4',[purchase,date,bank,ref,decimal(amount),note]);
  if(prior.rowCount){await conn.query('COMMIT');return prior.rows[0].identical?{id:prior.rows[0].id,duplicate:true}:fail('مرجع پرداخت قبلاً ثبت شده است.',409);}
  if((await conn.query(`SELECT 1 FROM gateway_settlement_evidence WHERE bank_account=$1 AND bank_ref=$2
- UNION ALL SELECT 1 FROM operating_expense_evidence WHERE funding_account=$1 AND payment_ref=$2`,[bank,ref])).rowCount){await conn.query('ROLLBACK');return fail('مرجع پرداخت در بخش دیگری ثبت شده است.',409);}
+ UNION ALL SELECT 1 FROM operating_expense_evidence WHERE funding_account=$1 AND payment_ref=$2
+ UNION ALL SELECT 1 FROM bank_movement_references WHERE account=$1 AND reference=$2`,[bank,ref])).rowCount){await conn.query('ROLLBACK');return fail('مرجع پرداخت در بخش دیگری ثبت شده است.',409);}
  const {rows:[a]}=await conn.query('SELECT coalesce(sum(amount_toman),0)::text AS paid FROM supplier_payment_evidence WHERE purchase_id=$1',[purchase]);
  if(cents(a.paid)+amount>cents(p.total_toman)){await conn.query('ROLLBACK');return fail('جمع پرداخت‌ها بیشتر از مبلغ فاکتور است.',409);}
  const id=randomUUID();
