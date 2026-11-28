@@ -91,9 +91,17 @@ Readiness at the latest production verification: 12/12 missing opening balance b
 
 - Recognize each source refund once against uncollected receivable and/or a separately tracked customer refund liability, with current immutable source revision and posted collection capacity checks. No refund automatically changes physical inventory.
 - Document actual refund payment independently from recognition, on the actual payment date: select real unmatched bank debit or enter source-currency provider refund report. Exact conversion, no duplicated bank reference, preserved raw evidence, partial payments, remaining liability and provider balance controls. Controlled central posting and posted payments/sales reports; synthetic positive full refund with two disbursements being tested.
+- PR #45 verified in production: release `f604da73ce9902b2f95b8c28e773334761530524`, upgrade run 46163644967, 239 HTTP assertions plus isolated paid-refund lifecycle, 57 authenticated screens and exact Toman refund preview verified.
 
 ## Phase ten: advanced ledger analytics and aging
 
 - Add exact posted-ledger daily, Persian-monthly and Persian-annual revenue, COGS, gross and net profit; product-category margin using current source classification; expense-by-ledger-category totals; provider gross/fee/tax/net collection, settlement, refund and closing clearing balance; conservative single-channel margin attribution with coverage count.
 - Add receivable age and payable invoice due-date buckets as of a selected date, with unknown due dates and remaining unallocated/opening obligations explicitly separated; tax ledger and period comparison, without claiming statutory tax compliance.
 - Each report has appropriate date filters, Persian labels and exact Toman display, Excel and print/PDF. All advanced financial reports remain unknown before actual verified opening approval. Internal cash transfers no longer inflate cash flow inflow/outflow.
+- PR #46 CI passed and merged as `49324a9c62ac7e81f52415a3bf8869e38720c652`; production browser acceptance in progress (run 46164212229).
+
+## Phase eleven: purchase acquisition components and returns
+
+- Exact six-decimal invoice and supplier-payment evidence. Optional documented gross lines, discount, acquisition freight/procurement costs and separately classified recoverable/nonrecoverable purchase tax. Deterministic proportional allocation retains the full monetary residual across line items; original breakdown and allocation evidence remain immutable. Recoverable tax is separated from inventory cost only upon explicit documented classification, not an assertion of legal deductibility.
+- Link physical supplier returns to actual posted purchase receipts, quantity and credit-note limits. Atomic weighted-average stock issue with tax reversal, invoice-specific payable reduction, excess supplier refund receivable, and explicit cost variance. Dates and available stock are validated; actual bank refund is not inferred. Payment controls and payable aging include posted returns.
+- Purchase return form and exact Toman reporting, supplier refund receivables and tax ledger distinction. Synthetic full/partial purchase and return accounting lifecycle under test; production opening remains gated.

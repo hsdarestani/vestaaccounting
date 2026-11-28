@@ -1,10 +1,10 @@
 import {randomUUID} from 'node:crypto';
+import {ledgerUnits,ledgerDecimal} from './source-posting.mjs';
 const banks=['1010','1011','1012','1013'];
 const clean=(v,max)=>typeof v==='string'&&v.trim()&&v.trim().length<=max?v.trim():null;
 const fail=(error,status=400)=>({error,status});
 const dateValid=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&new Date(v+'T00:00:00Z').toJSON()?.slice(0,10)===v;
-function cents(v){if(typeof v!=='string'||!/^\d{1,13}(\.\d{1,2})?$/.test(v))return null;const [a,b='']=v.split('.');return BigInt(a)*100n+BigInt(b.padEnd(2,'0'));}
-const decimal=n=>String(n/100n)+'.'+String(n%100n).padStart(2,'0');
+const cents=ledgerUnits,decimal=n=>{const [a,b='']=ledgerDecimal(n).split('.');return a+'.'+b.padEnd(2,'0');};
 export async function supplierPaymentList(pool,url){
  const start=url.searchParams.get('start')||'2026-11-24',end=url.searchParams.get('end')||'9999-12-31';
  if(!dateValid(start)||!dateValid(end)||start>end)return {rows:[],summary:[],invoices:[],start,end,posting_authorized:false};
@@ -21,7 +21,7 @@ export async function supplierPaymentList(pool,url){
  WHERE e.payment_date BETWEEN $1::date AND $2::date
  ), allocations AS (
  SELECT p.id,p.invoice_ref,s.name supplier_name,p.total_toman::text AS total_toman,
- coalesce(t.paid,0)::text AS allocated_toman,(p.total_toman-coalesce(t.paid,0))::text AS outstanding_toman
+ coalesce(t.paid,0)::text AS allocated_toman,(p.total_toman-coalesce(t.paid,0)-coalesce((SELECT sum(x.applied_payable_toman) FROM purchase_return_evidence r JOIN purchase_return_postings x ON x.evidence_id=r.id WHERE r.purchase_id=p.id),0))::text AS outstanding_toman
  FROM purchase_invoice_evidence p JOIN parties s ON s.id=p.supplier_id
  LEFT JOIN (SELECT purchase_id,sum(amount_toman) paid FROM supplier_payment_evidence GROUP BY purchase_id)t ON t.purchase_id=p.id
  ), sums AS (SELECT bank_account,count(*)::int count,sum(amount_toman::numeric)::text AS amount_toman FROM payments GROUP BY bank_account ORDER BY bank_account)
@@ -33,7 +33,7 @@ export async function supplierPaymentList(pool,url){
 }
 export async function recordSupplierPayment(pool,b,actor){
  const purchase=clean(b.purchase_id,80),bank=b.bank_account,ref=clean(b.payment_ref,120),note=clean(b.evidence_note,500),date=b.payment_date,amount=cents(b.amount_toman);
- if(!purchase||!banks.includes(bank)||!ref||!note||!dateValid(date)||amount===null||amount<=0n||amount>100000000000000n||b.allocation_confirmed!==true)return fail('فاکتور، مبلغ، تاریخ، مدرک پرداخت و تأیید تخصیص لازم است.');
+ if(!purchase||!banks.includes(bank)||!ref||!note||!dateValid(date)||amount===null||amount<=0n||amount>1000000000000000000n||b.allocation_confirmed!==true)return fail('فاکتور، مبلغ، تاریخ، مدرک پرداخت و تأیید تخصیص لازم است.');
  const conn=await pool.connect();
  try{
  await conn.query('BEGIN');
@@ -46,8 +46,8 @@ export async function recordSupplierPayment(pool,b,actor){
  if((await conn.query(`SELECT 1 FROM gateway_settlement_evidence WHERE bank_account=$1 AND bank_ref=$2
  UNION ALL SELECT 1 FROM operating_expense_evidence WHERE funding_account=$1 AND payment_ref=$2
  UNION ALL SELECT 1 FROM bank_movement_references WHERE account=$1 AND reference=$2 UNION ALL SELECT 1 FROM bank_statement_candidates WHERE source_kind IN('woo_collection','woo_refund_payment') AND account=$1 AND reference=$2`,[bank,ref])).rowCount){await conn.query('ROLLBACK');return fail('مرجع پرداخت در بخش دیگری ثبت شده است.',409);}
- const {rows:[a]}=await conn.query('SELECT coalesce(sum(amount_toman),0)::text AS paid FROM supplier_payment_evidence WHERE purchase_id=$1',[purchase]);
- if(cents(a.paid)+amount>cents(p.total_toman)){await conn.query('ROLLBACK');return fail('جمع پرداخت‌ها بیشتر از مبلغ فاکتور است.',409);}
+ const {rows:[a]}=await conn.query('SELECT coalesce((SELECT sum(amount_toman) FROM supplier_payment_evidence WHERE purchase_id=$1),0)::text paid,coalesce((SELECT sum(x.applied_payable_toman) FROM purchase_return_evidence r JOIN purchase_return_postings x ON x.evidence_id=r.id WHERE r.purchase_id=$1),0)::text returned',[purchase]);
+ if(cents(a.paid)+cents(a.returned)+amount>cents(p.total_toman)){await conn.query('ROLLBACK');return fail('جمع پرداخت‌ها و برگشت خرید بیشتر از مبلغ فاکتور است.',409);}
  const id=randomUUID();
  await conn.query(`INSERT INTO supplier_payment_evidence(id,purchase_id,payment_date,bank_account,payment_ref,amount_toman,evidence_note,actor)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[id,purchase,date,bank,ref,decimal(amount),note,actor]);

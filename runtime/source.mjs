@@ -5,7 +5,7 @@ import {postingStatus,openingApprovalPreview,activateOpening,controlledTransitio
 import {sourceReportModules,sourceLedgerReport,sourceLedgerDashboard,sourceJournalDetails} from './source-reports.mjs';
 import {advancedReportModules,advancedLedgerReport} from './ledger-analytics.mjs';
 import {tomanFields,currencyAudit} from './currency.mjs';
-import {postInventoryJournal,recordStockAdjustment,postStockAdjustment,stockAdjustmentList,stockReturnCandidates} from './source-inventory.mjs';
+import {postInventoryJournal,recordStockAdjustment,postStockAdjustment,stockAdjustmentList,stockReturnCandidates,recordPurchaseReturn,postPurchaseReturn,purchaseReturnList,purchaseReturnCandidates} from './source-inventory.mjs';
 import {runWooJournalQueue,wooJournalQueueList} from './woo-journal-queue.mjs';
 import {recordWooCollection,importGatewayCollections,collectionOrders,collectionBankRows,collectionList,draftWooCollection} from './woo-collections.mjs';
 import {recordRefundPayment,draftRefundPayment,refundPaymentList,refundPaymentCandidates,refundBankRows} from './woo-refund-payments.mjs';
@@ -74,6 +74,10 @@ export function sourceService(pool){return {
  async journalDetails(type,id){return sourceJournalDetails(pool,type,id);},
  async currencyAudit(){return currencyAudit(pool);},
  async postInventoryJournal(input,actor){return postInventoryJournal(pool,input,actor);},
+ async recordPurchaseReturn(input,actor){return recordPurchaseReturn(pool,input,actor);},
+ async postPurchaseReturn(input,actor){return postPurchaseReturn(pool,input,actor);},
+ async purchaseReturnList(url){return purchaseReturnList(pool,url);},
+ async purchaseReturnCandidates(q){return purchaseReturnCandidates(pool,q);},
  async recordStockAdjustment(input,actor){return recordStockAdjustment(pool,input,actor);},
  async postStockAdjustment(input,actor){return postStockAdjustment(pool,input,actor);},
  async stockAdjustments(url){return stockAdjustmentList(pool,url);},

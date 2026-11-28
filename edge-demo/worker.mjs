@@ -155,6 +155,9 @@ export default {async fetch(req,env){try{
   if(real&&path==='/api/opening-approval'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.openingApprovalPreview());}
   if(real&&path==='/api/currency-audit'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.currencyAudit());}
   if(real&&path==='/api/data/stock_adjustments'&&req.method==='GET')return json(await env.integration.stockAdjustments(url));
+  if(real&&path==='/api/data/purchase_returns'&&req.method==='GET')return json(await env.integration.purchaseReturnList(url));
+  if(real&&path==='/api/purchase-return-candidates'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.purchaseReturnCandidates(url.searchParams.get('q')));}
+  if(real&&path==='/api/purchase-return'&&req.method==='POST'){check(u.role==='owner','مجوز عملیات ندارید',403);const b=await body(req);const r=await (b.action==='post'?env.integration.postPurchaseReturn(b,u.actor):env.integration.recordPurchaseReturn(b,u.actor));return json(r,typeof r.status==='number'?r.status:201);}
   if(real&&path==='/api/stock-return-candidates'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.stockReturnCandidates(url.searchParams.get('q')));}
   if(real&&path==='/api/data/woo_journal_queue'&&req.method==='GET')return json(await env.integration.wooJournalQueue(url));
   if(real&&path==='/api/data/woo_collections'&&req.method==='GET')return json(await env.integration.collections(url));
