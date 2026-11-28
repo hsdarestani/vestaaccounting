@@ -13,7 +13,7 @@ function money(v,currency,signed=false){
 }
 const format=n=>n===null?null:String(n/1000000n)+(n%1000000n?'.'+String(n%1000000n).padStart(6,'0').replace(/0+$/,''):'');
 const key=i=>Number.isSafeInteger(i?.product_id)&&i.product_id>0&&Number.isSafeInteger(i.variation_id)&&i.variation_id>=0?i.product_id+':'+i.variation_id:null;
-const whole=n=>n%1000000n===0n&&n<=1000000000000000000n;
+const whole=n=>n!==null&&n>=0n&&n<=1000000000000000000n;
 export function refundProposals({original,current,refunds,cutover}){
  const reasons=new Set(),currency=original?.currency||current?.currency;
  const orig=original||current||{};

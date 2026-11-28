@@ -17,8 +17,6 @@ export async function purchaseInvoiceList(pool,url){
    to_char(e.received_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_utc,
    e.total_toman::text AS total_toman,e.items,e.evidence_note,j.ref AS draft_ref,
    CASE WHEN d.journal_id IS NOT NULL THEN 'draft_created'
-    WHEN mod(e.total_toman,1)<>0 THEN 'precision_review'
-    WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(e.items) i WHERE mod((i->>'value_toman')::numeric,1)<>0) THEN 'precision_review'
     WHEN NOT EXISTS(SELECT 1 FROM periods p WHERE (e.received_at AT TIME ZONE 'Asia/Tehran')::date BETWEEN p.starts AND p.ends AND p.locked=0) THEN 'period_required'
     ELSE 'draft_candidate' END AS purchase_status
   FROM purchase_invoice_evidence e JOIN parties p ON p.id=e.supplier_id
@@ -85,13 +83,13 @@ export async function draftPurchaseInvoice(pool,b,actor){
   const prior=await conn.query('SELECT journal_id FROM purchase_invoice_drafts WHERE evidence_id=$1',[id]);
   if(prior.rowCount){await conn.query('COMMIT');return {id:prior.rows[0].journal_id,duplicate:true};}
   const total=cents(e.total_exact);
-  if(total===null||total%100n!==0n||e.items.some(i=>cents(i.value_toman)%100n!==0n)){await conn.query('ROLLBACK');return fail('مبالغ اعشاری در دفتر فعلی قابل ثبت نیستند؛ گرد نمی‌شوند.',409);}
+  if(total===null||e.items.some(i=>cents(i.value_toman)===null)){await conn.query('ROLLBACK');return fail('مبالغ دقیق نامعتبر است.',409);}
   const period=await conn.query('SELECT id FROM periods WHERE $1::date BETWEEN starts AND ends AND locked=0 FOR SHARE',[e.purchase_date]);
   if(period.rowCount!==1){await conn.query('ROLLBACK');return fail('دوره مالی باز لازم است.',409);}
   const journal=randomUUID(),ref='purchase-evidence:'+id;
   await conn.query("INSERT INTO journals(id,ref,date,period,description,actor,at) VALUES($1,$2,$3,$4,'پیش‌نویس خرید نسیه؛ گردش قطعی انبار هنوز ثبت نشده',$5,now()::text)",[journal,ref,e.purchase_date,period.rows[0].id,actor]);
-  for(const i of e.items)await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'1200',$2,$3,0)",[journal,i.source_kind+':'+i.external_id+':'+i.parent_id,String(cents(i.value_toman)/100n)]);
-  await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'2010',$2,0,$3)",[journal,e.supplier_id,String(total/100n)]);
+  for(const i of e.items)await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'1200',$2,$3,0)",[journal,i.source_kind+':'+i.external_id+':'+i.parent_id,decimal(cents(i.value_toman))]);
+  await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'2010',$2,0,$3)",[journal,e.supplier_id,decimal(total)]);
   await conn.query('INSERT INTO purchase_invoice_drafts(evidence_id,journal_id) VALUES($1,$2)',[id,journal]);
   await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'purchase.invoice_draft',$2,'پیش‌نویس؛ بدون ثبت قطعی انبار یا بدهی')",[actor,ref]);
   await conn.query('COMMIT');return {id:journal,duplicate:false};

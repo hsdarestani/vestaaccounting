@@ -89,7 +89,7 @@ export async function salesProposalList(pool,url){
  }),start,end,posting_authorized:false};
 }
 
-function wholeToman(v){return /^\d{1,13}$/.test(v)&&BigInt(v)<=1000000000000n;}
+function wholeToman(v){const n=money(v,'IRT');return n!==null&&n<=1000000000000000000n;}
 export async function createRevenueDraft(pool,input,actor){
  const id=String(input.external_id??''),revision=input.revision_id;
  const error=(error,status=409)=>({error,status});

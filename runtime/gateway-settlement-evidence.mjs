@@ -18,7 +18,6 @@ export async function settlementList(pool,url){
     j.ref AS journal_ref,
     CASE WHEN d.journal_id IS NOT NULL THEN 'draft_created'
       WHEN e.ledger_basis='unknown' THEN 'basis_review'
-      WHEN mod(e.gross_toman,1)<>0 OR mod(e.net_toman,1)<>0 OR mod(e.fee_toman,1)<>0 THEN 'fractional_review'
       WHEN NOT EXISTS(SELECT 1 FROM periods p WHERE e.settlement_date BETWEEN p.starts AND p.ends AND p.locked=0) THEN 'period_required'
       ELSE 'ready_for_draft' END AS settlement_status
   FROM gateway_settlement_evidence e LEFT JOIN gateway_settlement_drafts d ON d.evidence_id=e.id
@@ -80,8 +79,8 @@ export async function draftSettlement(pool,b,actor){
   if(prior.rowCount){await client.query('COMMIT');return {id:prior.rows[0].journal_id,duplicate:true};}
   if(e.ledger_basis==='unknown'){await client.query('ROLLBACK');return invalid('مبنای مانده و کارمزد باید از دفتر تأیید شود.',409);}
   const amounts=[e.gross_exact,e.net_exact,e.fee_exact].map(cents);
-  if(amounts.some(n=>n===null||n%100n!==0n)){await client.query('ROLLBACK');return invalid('دفتر فعلی فقط تومان صحیح می‌پذیرد؛ مدرک دقیق محفوظ است و گرد نمی‌شود.',409);}
-  const [gross,net,fee]=amounts.map(n=>String(n/100n));
+  if(amounts.some(n=>n===null)){await client.query('ROLLBACK');return invalid('مبلغ دقیق نامعتبر است.',409);}
+  const [gross,net,fee]=amounts.map(decimal);
   const period=await client.query('SELECT id FROM periods WHERE $1::date BETWEEN starts AND ends AND locked=0 FOR SHARE',[e.settlement_date]);
   if(period.rowCount!==1){await client.query('ROLLBACK');return invalid('ابتدا دوره مالی باز مربوط به تاریخ تسویه را تعریف کنید.',409);}
   const journal=randomUUID(),ref='settlement-evidence:'+id;
@@ -89,7 +88,7 @@ export async function draftSettlement(pool,b,actor){
     VALUES($1,$2,$3,$4,'پیش‌نویس تسویه درگاه بر اساس مدرک ثبت‌شده',$5,now()::text)`,
     [journal,ref,e.settlement_date,period.rows[0].id,actor]);
   await client.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,$2,$3,$4,0),($1,$5,$3,0,$6)",[journal,e.bank_account,id,net,e.gateway_account,e.ledger_basis==='net_already_expensed'?net:gross]);
-  if(e.ledger_basis==='gross_unexpensed'&&fee!=='0')await client.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'5020',$2,$3,0)",[journal,id,fee]);
+  if(e.ledger_basis==='gross_unexpensed'&&amounts[2]>0n)await client.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'5020',$2,$3,0)",[journal,id,fee]);
   await client.query('INSERT INTO gateway_settlement_drafts(evidence_id,journal_id) VALUES($1,$2)',[id,journal]);
   await client.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'settlement.draft',$2,'سند پیش‌نویس؛ بدون تأیید یا ثبت قطعی')",[actor,ref]);
   await client.query('COMMIT');return {id:journal,duplicate:false};

@@ -1,0 +1,96 @@
+import {createHash,randomUUID} from 'node:crypto';
+const fail=(error,status=409)=>({error,status});
+const clean=(v,max)=>typeof v==='string'&&v.trim()&&v.trim().length<=max?v.trim():null;
+const unit=1000000n,max=1000000000000n*unit;
+export function ledgerUnits(v){if(typeof v!=='string'||!/^\d{1,16}(\.\d{1,6})?$/.test(v))return null;const [a,b='']=v.split('.');return BigInt(a)*unit+BigInt(b.padEnd(6,'0'));}
+export function ledgerDecimal(n){const sign=n<0n?'-':'';if(n<0n)n=-n;const f=String(n%unit).padStart(6,'0').replace(/0+$/,'');return sign+String(n/unit)+(f?'.'+f:'');}
+export async function postingStatus(pool){const {rows:[s]}=await pool.query('SELECT active,opening_journal,snapshot_digest,approved_by,activated_at FROM source_posting_state WHERE id=1');return s;}
+async function snapshot(conn){
+ const {rows:[meta]}=await conn.query(`SELECT (c.effective_at_utc AT TIME ZONE 'Asia/Tehran')::date AS cutover,
+  (SELECT id FROM periods p WHERE (c.effective_at_utc AT TIME ZONE 'Asia/Tehran')::date BETWEEN p.starts AND p.ends AND p.locked=0) AS period,
+  (SELECT observed_at FROM opening_capture WHERE id=1) AS capture_at,
+  (SELECT last_success IS NOT NULL FROM sync_control WHERE id=1) AS synced,
+  (SELECT count(*)::int FROM sync_state WHERE status='failed') AS sync_errors,
+  (SELECT count(*)::int FROM journals WHERE status='posted') AS posted,
+  (SELECT count(*)::int FROM exceptions WHERE status<>'resolved') AS exceptions FROM accounting_cutover c WHERE c.id=1`);
+ const {rows:balances}=await conn.query(`SELECT b.evidence_date,b.line_key,b.account_kind,l.account,l.party,a.kind account_type,p.kind party_type,r.id revision,
+  CASE WHEN r.id IS NOT NULL THEN (b.amount_toman-r.increases_toman+r.decreases_toman)::text END value_toman
+ FROM opening_input_balances_v1 b LEFT JOIN opening_balance_account_links l USING(evidence_date,line_key)
+ LEFT JOIN accounts a ON a.code=l.account LEFT JOIN parties p ON p.id=l.party
+ LEFT JOIN LATERAL(SELECT * FROM opening_balance_bridge_evidence e WHERE e.evidence_date=b.evidence_date AND e.line_key=b.line_key ORDER BY id DESC LIMIT 1) r ON true ORDER BY b.evidence_date,b.line_key`);
+ const {rows:stock}=await conn.query(`SELECT s.source_kind,s.external_id,s.parent_id,s.reconciliation_revision,s.reconciliation_status,s.opening_quantity,s.value_toman::text,c.revision cost_revision,
+ count(*) OVER(PARTITION BY s.source_kind,s.external_id)::int occurrences FROM opening_stock_reconciled_review s LEFT JOIN opening_purchase_cost_review c ON c.source_kind=s.source_kind AND c.external_id::text=s.external_id ORDER BY s.source_kind,s.external_id,s.parent_id`);
+ const reasons=[];if(!meta.period)reasons.push('opening_period');if(!meta.synced||meta.sync_errors)reasons.push('source_sync');if(!meta.capture_at)reasons.push('opening_capture');if(meta.posted)reasons.push('existing_posted_journals');if(meta.exceptions)reasons.push('open_exceptions');
+ if(!balances.length||balances.some(b=>!b.revision||b.value_toman===null))reasons.push('balance_evidence');
+ if(balances.some(b=>b.value_toman!==null&&(ledgerUnits(b.value_toman)===null||ledgerUnits(b.value_toman)>max)))reasons.push('balance_precision_or_negative');
+ if(balances.some(b=>b.value_toman!==null&&ledgerUnits(b.value_toman)>0n&&(!b.account||(b.account_kind==='supplier_payable'?(b.account_type!=='liability'||b.party_type!=='supplier'):b.account_type!=='asset'))))reasons.push('balance_mapping');
+ if(!stock.length||stock.some(s=>!s.reconciliation_revision))reasons.push('stock_evidence');
+ if(stock.some(s=>s.occurrences!==1||(s.source_kind==='variations'&&!/^[1-9][0-9]*$/.test(s.parent_id))))reasons.push('stock_identity');
+ if(stock.some(s=>!['zero_reviewed','non_estimated_reviewed'].includes(s.reconciliation_status)))reasons.push('stock_cost_or_quantity');
+ if(stock.some(s=>s.value_toman!==null&&(ledgerUnits(s.value_toman)===null||ledgerUnits(s.value_toman)>max)))reasons.push('stock_precision');
+ const evidence={cutover:meta.cutover,period:meta.period,balances,stock},digest=createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+ const lines=[];let difference=0n;if(!reasons.length){for(const b of balances){const n=ledgerUnits(b.value_toman);if(!n)continue;const payable=b.account_kind==='supplier_payable';lines.push({account:b.account,detail:b.party||b.line_key,debit:payable?'0':ledgerDecimal(n),credit:payable?ledgerDecimal(n):'0'});difference+=payable?-n:n;}
+ for(const s of stock){const n=ledgerUnits(s.value_toman);if(!n)continue;lines.push({account:'1200',detail:s.source_kind+':'+s.external_id+':'+s.parent_id,debit:ledgerDecimal(n),credit:'0'});difference+=n;}
+ // Large balancing amounts are split without rounding, preserving line capacity.
+ while(difference!==0n){const positive=difference>0n,absolute=positive?difference:-difference,n=absolute>max?max:absolute;lines.push({account:'3010',detail:'opening-capital',debit:positive?'0':ledgerDecimal(n),credit:positive?ledgerDecimal(n):'0'});difference+=positive?-n:n;}
+ if(lines.length<2)reasons.push('opening_empty');}
+ return {evidence,digest,reasons,lines,meta};
+}
+export async function openingApprovalPreview(pool){const conn=await pool.connect();try{await conn.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const state=await postingStatus(conn),s=await snapshot(conn);await conn.query('COMMIT');return {state,digest:s.digest,ready:!state.active&&!s.reasons.length,reasons:s.reasons,cutover:s.meta.cutover,balance_count:s.evidence.balances.length,stock_count:s.evidence.stock.length,line_count:s.lines.length,preview:s.lines.slice(0,50),preview_truncated:s.lines.length>50};}catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}}
+async function authorize(conn,id,stage,actor,note){await conn.query('INSERT INTO source_posting_authorizations(journal_id,stage,actor,note) VALUES($1,$2,$3,$4)',[id,stage,actor,note]);await conn.query(stage==='approved'?"UPDATE journals SET status='approved',approved_by=$2 WHERE id=$1":"UPDATE journals SET status='posted',posted_by=$2 WHERE id=$1",[id,actor]);}
+export async function activateOpening(pool,b,actor){
+ const note=clean(b.note,500);if(b.scope_confirmed!==true||b.valuation_confirmed!==true||!note||typeof b.digest!=='string'||!/^[a-f0-9]{64}$/.test(b.digest))return fail('تأیید دامنه، ارزشیابی و پیش‌نمایش معتبر لازم است.',400);
+ const conn=await pool.connect();try{await conn.query('BEGIN');await conn.query('SELECT pg_advisory_xact_lock(20261128)');const {rows:[state]}=await conn.query('SELECT * FROM source_posting_state WHERE id=1 FOR UPDATE');if(state.active){await conn.query('COMMIT');return state.snapshot_digest===b.digest?{duplicate:true,journal:state.opening_journal}:fail('افتتاحیه قبلاً قطعی شده است.');}
+ // Prevent evidence revisions during the exact snapshot and atomic opening transaction.
+ await conn.query('LOCK TABLE opening_input_balances_v1,opening_balance_account_links,opening_balance_bridge_evidence,opening_capture,opening_capture_items,opening_stock_reconciliation,opening_input_costs_v1,purchase_cost_revisions,accounting_cutover,periods,exceptions IN SHARE MODE');
+ const s=await snapshot(conn);if(s.reasons.length||s.digest!==b.digest){await conn.query('ROLLBACK');return fail('مدارک افتتاحیه ناقص یا پیش‌نمایش تغییر کرده است.');}
+ const id=randomUUID();await conn.query("INSERT INTO journals(id,ref,date,period,description,actor,at) VALUES($1,'source-opening',$2,$3,'افتتاحیه تأییدشده وستا',$4,now()::text)",[id,s.meta.cutover,s.meta.period,actor]);
+ await conn.query(`INSERT INTO lines(journal,account,detail,debit,credit) SELECT $1,account,detail,debit,credit FROM jsonb_to_recordset($2::jsonb) x(account text,detail text,debit numeric,credit numeric)`,[id,JSON.stringify(s.lines)]);
+ await conn.query('INSERT INTO source_opening_snapshots(journal_id,digest,content,actor) VALUES($1,$2,$3::jsonb,$4)',[id,s.digest,JSON.stringify(s.evidence),actor]);
+ await conn.query(`INSERT INTO source_inventory_balances(source_kind,external_id,parent_id,quantity,value_toman,opening_journal) SELECT source_kind,external_id,parent_id,opening_quantity,value_toman,$1 FROM jsonb_to_recordset($2::jsonb) x(source_kind text,external_id text,parent_id text,opening_quantity bigint,value_toman numeric)`,[id,JSON.stringify(s.evidence.stock)]);
+ await conn.query('UPDATE source_posting_state SET opening_journal=$1,snapshot_digest=$2,approved_by=$3,approval_note=$4 WHERE id=1',[id,s.digest,actor,note]);
+ await authorize(conn,id,'approved',actor,note);await authorize(conn,id,'posted',actor,note);await conn.query('UPDATE source_posting_state SET active=true,activated_at=now() WHERE id=1');await conn.query("UPDATE accounting_cutover SET status='approved',stock_snapshot_status='reconciled' WHERE id=1");
+ await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'source.opening_posted',$2,'افتتاحیه متوازن، هویت و مدارک محفوظ')",[actor,id]);await conn.query('COMMIT');return {journal:id,posting_authorized:true,duplicate:false};
+ }catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}
+}
+
+// Safe posting scope: documented non-inventory workflows only. Inventory-linked
+// purchases and Woo documents are deliberately held until their atomic stock engine.
+export async function controlledTransition(pool,b,actor){
+ const id=clean(b.id,80),stage=b.stage,note=clean(b.note,500);if(!id||!['approved','posted'].includes(stage)||!note||b.confirmed!==true)return fail('تأیید و توضیح ثبت سند لازم است.',400);
+ const conn=await pool.connect();try{await conn.query('BEGIN');await conn.query('SELECT pg_advisory_xact_lock(20261128)');const state=await postingStatus(conn);if(!state.active){await conn.query('ROLLBACK');return fail('ابتدا افتتاحیه واقعی تأیید و ثبت شود.');}
+ const {rows:[j]}=await conn.query('SELECT id,ref,status,date FROM journals WHERE id=$1 FOR UPDATE',[id]);if(!j){await conn.query('ROLLBACK');return fail('سند یافت نشد.',404);}if(j.status===stage){await conn.query('COMMIT');return {id,duplicate:true,status:stage};}
+ if((stage==='approved'&&j.status!=='draft')||(stage==='posted'&&j.status!=='approved')){await conn.query('ROLLBACK');return fail('ترتیب تأیید و ثبت قطعی نامعتبر است.');}
+ // Evidence ownership and one-to-one bank-statement reconciliation. Cash vouchers
+ // are manually documented; never interpret Woo paid status as bank receipt.
+ const {rows:[e]}=await conn.query(`SELECT 'bank' kind,b.id evidence_id,b.movement_kind,b.party_id,b.amount_toman::text amount,b.bank_account account,b.other_bank_account other_account,NULL::text purchase_id,NULL::text gateway_account FROM bank_movement_drafts d JOIN bank_movement_evidence b ON b.id=d.evidence_id WHERE d.journal_id=$1
+ UNION ALL SELECT 'expense',e.id,NULL,e.supplier_id,e.amount_toman::text,e.funding_account,NULL,NULL,NULL FROM operating_expense_drafts d JOIN operating_expense_evidence e ON e.id=d.evidence_id WHERE d.journal_id=$1
+ UNION ALL SELECT 'supplier',e.id,NULL,p.supplier_id,e.amount_toman::text,e.bank_account,NULL,e.purchase_id,NULL FROM supplier_payment_drafts d JOIN supplier_payment_evidence e ON e.id=d.evidence_id JOIN purchase_invoice_evidence p ON p.id=e.purchase_id WHERE d.journal_id=$1
+ UNION ALL SELECT 'settlement',e.id,NULL,NULL,(CASE WHEN e.ledger_basis='net_already_expensed' THEN e.net_toman ELSE e.gross_toman END)::text,e.bank_account,NULL,NULL,e.gateway_account FROM gateway_settlement_drafts d JOIN gateway_settlement_evidence e ON e.id=d.evidence_id WHERE d.journal_id=$1`,[id]);
+ if(!e){const manual=j.ref.startsWith('manual:')||j.ref.startsWith('manual-reversal:');const protectedAccounts=['1010','1011','1012','1013','1100','1200','1310','1320','1330','1340','1350','1390','2010','2020','2100'];
+  if(!manual||(await conn.query('SELECT 1 FROM lines WHERE journal=$1 AND account=ANY($2::text[]) LIMIT 1',[id,protectedAccounts])).rowCount){await conn.query('ROLLBACK');return fail('سند نیازمند مسیر ثبت تخصصی فروش، انبار یا حساب کنترلی است.');}
+  await authorize(conn,id,stage,actor,note);await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,$2,$3,'ثبت کنترل‌شده سند دستی')",[actor,'source.journal_'+stage,id]);await conn.query('COMMIT');return {id,status:stage,duplicate:false};
+ }
+ const prefix={bank:'movement',expense:'expense',supplier:'supplier',settlement:'settlement'}[e.kind];
+ const accounts=[e.account,e.other_account].filter(a=>['1010','1012','1013'].includes(a));
+ for(const a of accounts){if(!(await conn.query('SELECT 1 FROM bank_statement_links WHERE source_key=$1',[prefix+':'+e.evidence_id+':'+a])).rowCount){await conn.query('ROLLBACK');return fail('صورت‌حساب واقعی بانک باید با این مدرک تطبیق داده شود.');}}
+ if(e.kind==='supplier'){
+  if(!(await conn.query("SELECT 1 FROM purchase_invoice_drafts d JOIN journals j ON j.id=d.journal_id WHERE d.evidence_id=$1 AND j.status='posted'",[e.purchase_id])).rowCount){await conn.query('ROLLBACK');return fail('فاکتور خرید مربوط هنوز قطعی نیست.');}
+ }
+ if(e.kind==='settlement'||e.kind==='supplier'||(e.kind==='bank'&&e.movement_kind==='customer_receipt')){
+  const account=e.kind==='settlement'?e.gateway_account:e.kind==='supplier'?'2010':'1100',detail=e.kind==='settlement'?'':e.party_id;
+  const {rows:[balance]}=await conn.query(`SELECT coalesce(sum(${e.kind==='supplier'?'l.credit-l.debit':'l.debit-l.credit'}),0)::text amount FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted' AND l.account=$1 AND ($2='' OR l.detail=$2)`,[account,detail||'']);
+  const signed=balance.amount.startsWith('-')?-ledgerUnits(balance.amount.slice(1)):ledgerUnits(balance.amount);if(signed<ledgerUnits(e.amount)){await conn.query('ROLLBACK');return fail('مانده مستند حساب برای این ثبت کافی نیست.');}
+ }
+ await authorize(conn,id,stage,actor,note);await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,$2,$3,'ثبت کنترل‌شده با مدرک و تأیید')",[actor,'source.journal_'+stage,id]);await conn.query('COMMIT');return {id,status:stage,duplicate:false};
+ }catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}
+}
+
+const dateValid=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&new Date(v+'T00:00:00Z').toJSON()?.slice(0,10)===v;
+export async function manualSourceDraft(pool,b,actor){
+ const ref=clean(b.ref,120),description=clean(b.description,500),date=b.date;if(!ref||!description||!dateValid(date)||!Array.isArray(b.lines)||b.lines.length<2||b.lines.length>100)return fail('تاریخ، مرجع، شرح و ردیف‌های معتبر لازم است.',400);
+ const lines=[];let balance=0n;for(const l of b.lines){const account=clean(l.account,12),detail=typeof l.detail==='string'?l.detail.trim():'',debit=ledgerUnits(l.debit),credit=ledgerUnits(l.credit);if(!account||detail.length>180||debit===null||credit===null||debit>max||credit>max||(debit>0n)===(credit>0n))return fail('مبلغ دقیق و تنها یک سمت مثبت برای هر ردیف لازم است.',400);balance+=debit-credit;lines.push({account,detail,debit:ledgerDecimal(debit),credit:ledgerDecimal(credit)});}if(balance!==0n)return fail('جمع بدهکار و بستانکار باید دقیقاً برابر باشد.',400);
+ const conn=await pool.connect();try{await conn.query('BEGIN');const period=await conn.query('SELECT id FROM periods WHERE $1::date BETWEEN starts AND ends AND locked=0 FOR SHARE',[date]);if(period.rowCount!==1){await conn.query('ROLLBACK');return fail('دوره مالی باز لازم است.');}const valid=await conn.query('SELECT code FROM accounts WHERE code=ANY($1::text[])',[[...new Set(lines.map(l=>l.account))]]);if(valid.rowCount!==new Set(lines.map(l=>l.account)).size){await conn.query('ROLLBACK');return fail('حساب نامعتبر است.',400);}const id=randomUUID();await conn.query("INSERT INTO journals(id,ref,date,period,description,actor,at) VALUES($1,$2,$3,$4,$5,$6,now()::text)",[id,'manual:'+ref,date,period.rows[0].id,description,actor]);await conn.query(`INSERT INTO lines(journal,account,detail,debit,credit) SELECT $1,account,detail,debit,credit FROM jsonb_to_recordset($2::jsonb) x(account text,detail text,debit numeric,credit numeric)`,[id,JSON.stringify(lines)]);await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'source.manual_draft',$2,'پیش‌نویس دقیق')",[actor,id]);await conn.query('COMMIT');return {id};}catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}
+}
+export async function reverseManualSource(pool,b,actor){const old=clean(b.id,80),note=clean(b.note,500),date=b.date;if(!old||!note||!dateValid(date)||b.confirmed!==true)return fail('تاریخ و علت برگشت مستند لازم است.',400);const conn=await pool.connect();try{await conn.query('BEGIN');await conn.query('SELECT pg_advisory_xact_lock(20261128)');const state=await postingStatus(conn);if(!state.active){await conn.query('ROLLBACK');return fail('دفتر قطعی فعال نیست.');}const {rows:[j]}=await conn.query("SELECT * FROM journals WHERE id=$1 AND status='posted' AND ref LIKE 'manual:%' FOR SHARE",[old]);if(!j){await conn.query('ROLLBACK');return fail('فقط سند دستی قطعی از این مسیر قابل برگشت است.');}const prior=await conn.query('SELECT id FROM journals WHERE reverses=$1',[old]);if(prior.rowCount){await conn.query('COMMIT');return {id:prior.rows[0].id,duplicate:true};}const period=await conn.query('SELECT id FROM periods WHERE $1::date BETWEEN starts AND ends AND locked=0 FOR SHARE',[date]);if(period.rowCount!==1||date<j.date){await conn.query('ROLLBACK');return fail('دوره باز و تاریخ بعد از سند اولیه لازم است.');}const id=randomUUID();await conn.query("INSERT INTO journals(id,ref,date,period,description,actor,reverses,at) VALUES($1,$2,$3,$4,$5,$6,$7,now()::text)",[id,'manual-reversal:'+old,date,period.rows[0].id,note,actor,old]);await conn.query('INSERT INTO lines(journal,account,detail,debit,credit) SELECT $1,account,detail,credit,debit FROM lines WHERE journal=$2',[id,old]);await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'source.manual_reversal',$2,'پیش‌نویس برگشت سند دستی')",[actor,id]);await conn.query('COMMIT');return {id,duplicate:false};}catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}}
+export async function controlPeriod(pool,b,actor){const id=clean(b.id,80),note=clean(b.note,500);if(!id||!note||typeof b.locked!=='boolean'||b.confirmed!==true)return fail('دلیل و تأیید کنترل دوره لازم است.',400);const conn=await pool.connect();try{await conn.query('BEGIN');await conn.query('SELECT pg_advisory_xact_lock(20261128)');const state=await postingStatus(conn);if(!state.active){await conn.query('ROLLBACK');return fail('ابتدا افتتاحیه تأیید شود.');}const {rows:[p]}=await conn.query('SELECT * FROM periods WHERE id=$1 FOR UPDATE',[id]);if(!p){await conn.query('ROLLBACK');return fail('دوره یافت نشد.',404);}if(b.locked&&(await conn.query("SELECT 1 FROM journals WHERE period=$1 AND status<>'posted' LIMIT 1",[id])).rowCount){await conn.query('ROLLBACK');return fail('ابتدا تکلیف همه پیش‌نویس‌های دوره مشخص شود.');}await conn.query('UPDATE periods SET locked=$2 WHERE id=$1',[id,b.locked?1:0]);await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,$2,$3,$4)",[actor,b.locked?'source.period_locked':'source.period_reopened',id,note]);await conn.query('COMMIT');return {id,locked:b.locked};}catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}}
