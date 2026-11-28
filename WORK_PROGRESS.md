@@ -18,4 +18,11 @@ Baseline: production release `8853d5e1cce91bd7d6ab1348a74cbca00ed39a76`.
 - Obtain actual bank statements/provider settlements, supplier payment evidence, and owner/accountant approval where unavailable. Do not invent values or infer bank receipt from Woo payment status.
 - No tax/legal compliance claim; verify applicable Iranian rules with qualified accountant before final approval.
 
-Release state: implementation in branch; production deployment not yet verified at time of writing.
+Phase one: PR #37 merged, PostgreSQL 197 HTTP assertions passed (including restore), evaluation suite passed. Deployment run 46136804959; production browser verification must be confirmed.
+
+## Phase two: expense categories and counterparties
+
+- Add 17 operational expense categories, configurable names and active/inactive status; historical evidence remains intact and its original account mapping is preserved.
+- Category and payment status drive expense form fields. Existing accounting evidence without a category remains explicitly uncategorized.
+- Authorized owner can create customers/suppliers using a human-readable form with automatic internal reference. This is not automatic WooCommerce identity matching or opening balance posting.
+- Continue to label partial source dashboard values as incomplete when dates or source refresh are missing.
