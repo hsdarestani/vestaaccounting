@@ -59,7 +59,7 @@ export function refundProposals({original,current,refunds,cutover}){
   return {refund_id:r.id,revision_id:r.revision_id,refund_toman:format(amount),merchandise_toman:format(net),refund_tax_toman:format(tax),refund_extent:gross!==null&&cumulative===gross?'full_cumulative':gross!==null&&cumulative<gross?'partial_cumulative':'unverified',reasons:issues,lines,status:issues.length?'review_required':'receivable_reversal_candidate',posting_authorized:false};
  });
 }
-async function loadOrderRefunds(conn,orderId){
+export async function loadOrderRefunds(conn,orderId){
  const {rows:[row]}=await conn.query(`
  SELECT r.payload current,o.payload original,
  to_char(a.effective_at_utc AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS') cutover,
@@ -111,7 +111,7 @@ export async function createRefundDraft(pool,b,actor){
  const prior=await conn.query('SELECT refund_revision,journal_id FROM woo_refund_review_drafts WHERE order_id=$1 AND refund_id=$2',[orderId,refundId]);
  if(prior.rowCount){await conn.query('COMMIT');return prior.rows[0].refund_revision===revision?{id:prior.rows[0].journal_id,duplicate:true}:fail('نسخه استرداد تغییر کرده است.');}
  const {rows:[original]}=await conn.query("SELECT status FROM journals WHERE id=$1 FOR SHARE",[input.original_journal]);
- if(original?.status!=='draft'){await conn.query('ROLLBACK');return fail('فقط اصلاح پیشنهادی پیش‌نویس درآمد مجاز است.');}
+ if(!['draft','posted'].includes(original?.status)){await conn.query('ROLLBACK');return fail('سند فروش اولیه معتبر لازم است.');}
  const {rows:[date]}=await conn.query("SELECT ($1::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tehran')::date AS local_date",[input.refunds.find(r=>r.id===refundId).payload.date_created_gmt]);
  const period=await conn.query('SELECT id FROM periods WHERE $1::date BETWEEN starts AND ends AND locked=0 FOR SHARE',[date.local_date]);
  if(period.rowCount!==1){await conn.query('ROLLBACK');return fail('دوره مالی باز لازم است.');}

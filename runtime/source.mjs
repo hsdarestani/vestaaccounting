@@ -4,6 +4,8 @@ import {bankStatementList,importBankStatement,reconcileBankStatement,confirmStat
 import {postingStatus,openingApprovalPreview,activateOpening,controlledTransition,manualSourceDraft,reverseManualSource,controlPeriod} from './source-posting.mjs';
 import {sourceReportModules,sourceLedgerReport,sourceLedgerDashboard,sourceJournalDetails} from './source-reports.mjs';
 import {tomanFields,currencyAudit} from './currency.mjs';
+import {postInventoryJournal,recordStockAdjustment,postStockAdjustment,stockAdjustmentList,stockReturnCandidates} from './source-inventory.mjs';
+import {runWooJournalQueue,wooJournalQueueList} from './woo-journal-queue.mjs';
 import {operationalDashboard,searchPurchaseCatalog} from './operational-dashboard.mjs';
 import {supplierPaymentList,recordSupplierPayment,draftSupplierPayment} from './supplier-payment-evidence.mjs';
 import {purchaseInvoiceList,recordPurchaseInvoice,draftPurchaseInvoice} from './purchase-invoice-evidence.mjs';
@@ -68,6 +70,13 @@ export function sourceService(pool){return {
  async ledgerReport(module,url){return sourceReportModules.includes(module)?sourceLedgerReport(pool,module,url):null;},
  async journalDetails(type,id){return sourceJournalDetails(pool,type,id);},
  async currencyAudit(){return currencyAudit(pool);},
+ async postInventoryJournal(input,actor){return postInventoryJournal(pool,input,actor);},
+ async recordStockAdjustment(input,actor){return recordStockAdjustment(pool,input,actor);},
+ async postStockAdjustment(input,actor){return postStockAdjustment(pool,input,actor);},
+ async stockAdjustments(url){return stockAdjustmentList(pool,url);},
+ async stockReturnCandidates(query){return stockReturnCandidates(pool,query);},
+ async runWooJournalQueue(input){return runWooJournalQueue(pool,{limit:30,retryReview:input.retry_review===true});},
+ async wooJournalQueue(url){return wooJournalQueueList(pool,url);},
  async bankMovements(url){return bankMovementList(pool,url);},
  async bankStatements(url){return bankStatementList(pool,url);},
  async importBankStatement(input,actor){return importBankStatement(pool,input,actor);},

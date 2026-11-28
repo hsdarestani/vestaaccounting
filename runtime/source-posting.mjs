@@ -1,4 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {loadOrderRefunds,refundProposals} from './woo-refund-review.mjs';
 const fail=(error,status=409)=>({error,status});
 const clean=(v,max)=>typeof v==='string'&&v.trim()&&v.trim().length<=max?v.trim():null;
 const unit=1000000n,max=1000000000000n*unit;
@@ -67,7 +68,12 @@ export async function controlledTransition(pool,b,actor){
  UNION ALL SELECT 'expense',e.id,NULL,e.supplier_id,e.amount_toman::text,e.funding_account,NULL,NULL,NULL FROM operating_expense_drafts d JOIN operating_expense_evidence e ON e.id=d.evidence_id WHERE d.journal_id=$1
  UNION ALL SELECT 'supplier',e.id,NULL,p.supplier_id,e.amount_toman::text,e.bank_account,NULL,e.purchase_id,NULL FROM supplier_payment_drafts d JOIN supplier_payment_evidence e ON e.id=d.evidence_id JOIN purchase_invoice_evidence p ON p.id=e.purchase_id WHERE d.journal_id=$1
  UNION ALL SELECT 'settlement',e.id,NULL,NULL,(CASE WHEN e.ledger_basis='net_already_expensed' THEN e.net_toman ELSE e.gross_toman END)::text,e.bank_account,NULL,NULL,e.gateway_account FROM gateway_settlement_drafts d JOIN gateway_settlement_evidence e ON e.id=d.evidence_id WHERE d.journal_id=$1`,[id]);
- if(!e){const manual=j.ref.startsWith('manual:')||j.ref.startsWith('manual-reversal:');const protectedAccounts=['1010','1011','1012','1013','1100','1200','1310','1320','1330','1340','1350','1390','2010','2020','2100'];
+ if(!e){const {rows:[refund]}=await conn.query(`SELECT d.order_id,d.refund_id,d.refund_revision,o.journal_id original_journal FROM woo_refund_review_drafts d JOIN woo_revenue_drafts o ON o.external_id=d.order_id WHERE d.journal_id=$1`,[id]);
+  if(refund){await conn.query("SELECT 1 FROM raw_current WHERE (kind='orders' AND external_id=$1 AND parent_id='') OR (kind='refunds' AND external_id=$2 AND parent_id=$1) FOR UPDATE",[refund.order_id,refund.refund_id]);const input=await loadOrderRefunds(conn,refund.order_id),proposal=input&&refundProposals(input).find(r=>r.refund_id===refund.refund_id);const posted=(await conn.query("SELECT 1 FROM journals WHERE id=$1 AND status='posted'",[refund.original_journal])).rowCount;
+   if(!posted||!proposal||proposal.status!=='receivable_reversal_candidate'||proposal.revision_id!==refund.refund_revision){await conn.query('ROLLBACK');return fail('فروش قطعی، نسخه برگشت معتبر و مدارک کامل لازم است.');}
+   const {rows:[balance]}=await conn.query("SELECT coalesce(sum(l.debit-l.credit),0)::text amount FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted' AND l.account='1100' AND l.detail=$1",['woo-order:'+refund.order_id]);const signed=balance.amount.startsWith('-')?-ledgerUnits(balance.amount.slice(1)):ledgerUnits(balance.amount);if(signed<ledgerUnits(proposal.refund_toman)){await conn.query('ROLLBACK');return fail('مبلغ استرداد از دریافتنی وصول‌نشده بیشتر است؛ استرداد بانکی جداگانه لازم است.');}
+   await authorize(conn,id,stage,actor,note);await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,$2,$3,'برگشت مالی دریافتنی؛ بدون فرض بازگشت کالا یا وجه')",[actor,'source.journal_'+stage,id]);await conn.query('COMMIT');return {id,status:stage,duplicate:false};}
+  const manual=j.ref.startsWith('manual:')||j.ref.startsWith('manual-reversal:');const protectedAccounts=['1010','1011','1012','1013','1100','1200','1310','1320','1330','1340','1350','1390','2010','2020','2100'];
   if(!manual||(await conn.query('SELECT 1 FROM lines WHERE journal=$1 AND account=ANY($2::text[]) LIMIT 1',[id,protectedAccounts])).rowCount){await conn.query('ROLLBACK');return fail('سند نیازمند مسیر ثبت تخصصی فروش، انبار یا حساب کنترلی است.');}
   await authorize(conn,id,stage,actor,note);await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,$2,$3,'ثبت کنترل‌شده سند دستی')",[actor,'source.journal_'+stage,id]);await conn.query('COMMIT');return {id,status:stage,duplicate:false};
  }
