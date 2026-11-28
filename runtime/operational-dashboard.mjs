@@ -18,22 +18,22 @@ export async function operationalDashboard(pool, url) {
    WHERE c.kind='orders' AND c.parent_id='' AND r.payload->>'status'='completed'
  ), dated AS (
    SELECT CASE WHEN completed_at ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$' AND pg_input_is_valid(completed_at,'timestamp')
-      THEN (completed_at::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tehran')::date END day,amount FROM candidates
+      THEN (completed_at::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tehran')::date END AS local_day,amount FROM candidates
  ), ranges AS (
    SELECT 'today' label,today starts,today ends FROM dates UNION ALL
    SELECT 'month',month_start,today FROM dates UNION ALL
    SELECT 'selected',first_day,last_day FROM dates
  ), totals AS (
-   SELECT label,count(day)::int orders,count(day) FILTER(WHERE amount IS NULL)::int unknown,
-     CASE WHEN count(day)>0 AND count(day) FILTER(WHERE amount IS NULL)=0 THEN trim_scale(sum(amount))::text END amount
-   FROM ranges LEFT JOIN dated ON day BETWEEN starts AND ends GROUP BY label
+   SELECT label,count(local_day)::int AS orders,count(local_day) FILTER(WHERE amount IS NULL)::int AS unknown,
+     CASE WHEN count(local_day)>0 AND count(local_day) FILTER(WHERE amount IS NULL)=0 THEN trim_scale(sum(amount))::text END AS amount
+   FROM ranges LEFT JOIN dated ON local_day BETWEEN starts AND ends GROUP BY label
  ), daily AS (
-   SELECT day::text date,count(*)::int orders,count(*) FILTER(WHERE amount IS NULL)::int unknown,
-     CASE WHEN count(*) FILTER(WHERE amount IS NULL)=0 THEN trim_scale(sum(amount))::text END amount
-   FROM dated CROSS JOIN dates WHERE day BETWEEN first_day AND last_day GROUP BY day ORDER BY day
+   SELECT local_day::text AS date,count(*)::int AS orders,count(*) FILTER(WHERE amount IS NULL)::int AS unknown,
+     CASE WHEN count(*) FILTER(WHERE amount IS NULL)=0 THEN trim_scale(sum(amount))::text END AS amount
+   FROM dated CROSS JOIN dates WHERE local_day BETWEEN first_day AND last_day GROUP BY local_day ORDER BY local_day
  ) SELECT (SELECT jsonb_object_agg(label,to_jsonb(totals)-'label') FROM totals) totals,
    (SELECT coalesce(jsonb_agg(daily ORDER BY date),'[]'::jsonb) FROM daily) daily,
-   (SELECT count(*)::int FROM dated WHERE day IS NULL) undated,
+   (SELECT count(*)::int FROM dated WHERE local_day IS NULL) undated,
    (SELECT last_success FROM sync_control WHERE id=1) last_sync
  `,[start,end,valid(url.searchParams.get('month_start')||'')?url.searchParams.get('month_start'):start]);
  return {...result,start,end,financial_verified:false};
