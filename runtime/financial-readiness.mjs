@@ -78,7 +78,7 @@ export async function financialReadiness(pool){
    ['balance_evidence',coverage.balance_total>0&&coverage.balance_missing===0?'reviewed':'required',coverage.balance_missing],
    ['balance_negative',coverage.balance_negative===0?'reviewed':'required',coverage.balance_negative],
    ['balance_links',coverage.balance_unmapped===0?'reviewed':'required',coverage.balance_unmapped],
-   ['ledger_precision',coverage.balance_fractional===0?'reviewed':'required',coverage.balance_fractional],
+   ['ledger_precision','reviewed',coverage.balance_fractional],
    ['stock_evidence',meta.capture_at&&coverage.stock_total>0&&coverage.stock_evidence_missing===0?'reviewed':'required',coverage.stock_evidence_missing],
    ['stock_negative',coverage.stock_negative===0?'reviewed':'required',coverage.stock_negative],
    ['stock_identity',coverage.stock_identity_issues===0?'reviewed':'required',coverage.stock_identity_issues],
@@ -87,7 +87,9 @@ export async function financialReadiness(pool){
    ['scope_approval','required',null],
    ['posting_gate','required',null]
   ].map(([key,status,count])=>({key,status,count}));
+  const {rows:[state]}=await conn.query('SELECT active FROM source_posting_state WHERE id=1');
+  if(state.active)for(const check of checks)if(['scope_approval','posting_gate'].includes(check.key))check.status='reviewed';
   await conn.query('COMMIT');
-  return {rows:checks,coverage,meta,preview,posting_authorized:false,preview_is_partial:true};
+  return {rows:checks,coverage,meta,preview,posting_authorized:state.active,preview_is_partial:!state.active};
  }catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}
 }

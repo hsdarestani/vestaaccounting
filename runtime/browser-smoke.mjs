@@ -19,7 +19,7 @@ try {
   assert.ok(root.headers()['strict-transport-security']);
   const health=await (await page.request.get(url+'/health',{maxRedirects:0})).json();
   assert.equal(health.database,'postgresql');assert.equal(health.mode,'source');
-  assert.equal(health.store_writes,false);assert.equal(health.posting_authorized,false);
+  assert.equal(health.store_writes,false);assert.equal(typeof health.posting_authorized,'boolean');assert.equal(health.accounting_currency,'IRT');
   if(process.env.EXPECT_RELEASE)assert.equal(health.version,process.env.EXPECT_RELEASE);
   console.log('browser_public_release='+health.version);
   assert.equal(await page.locator('html').getAttribute('dir'),'rtl');
@@ -142,11 +142,14 @@ try {
     if(view==='financial_readiness'){
       const response=await page.request.get(url+'/api/data/financial_readiness');
       assert.equal(response.status(),200);const evidence=await response.json();
-      assert.equal(evidence.posting_authorized,false);assert.equal(evidence.preview_is_partial,true);
+      assert.equal(evidence.posting_authorized,health.posting_authorized);assert.equal(evidence.preview_is_partial,!health.posting_authorized);
       assert.ok(evidence.coverage.imported_costs>0&&evidence.coverage.stock_total>0);
       const units=v=>{const [whole,fraction='']=v.split('.');return BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0'));};
       assert.equal(evidence.preview.reduce((sum,row)=>sum+units(row.debit)-units(row.credit),0n),0n);
       await page.getByRole('heading',{name:'وضعیت واقعی دفتر مالی',exact:true}).waitFor();
+      const approval=await page.request.get(url+'/api/opening-approval');assert.equal(approval.status(),200);const p=await approval.json();assert.equal(p.state.active,health.posting_authorized);
+      if(!p.ready&&!p.state.active)assert.equal(await page.getByRole('button',{name:'تأیید و ثبت قطعی افتتاحیه',exact:true}).isDisabled(),true);
+      const currency=await page.request.get(url+'/api/currency-audit');assert.equal(currency.status(),200);assert.equal((await currency.json()).accounting_currency,'IRT');
       console.log('browser_financial_readiness_verified=true');
       console.log('financial_readiness_counts='+JSON.stringify(evidence.coverage));
     }
@@ -222,7 +225,7 @@ try {
       await file.setInputFiles({name:'preview-invalid.csv',mimeType:'text/csv',buffer:Buffer.from('تاریخ,مرجع,واریز,برداشت,شرح\n۱۴۰۵/۰۹/۰۵,PREVIEW-ONLY,۱۲۵۰,۱۰,نمونه')});await page.waitForFunction(()=>Array.from(document.querySelectorAll('#content .hint')).some(x=>x.textContent.includes('تنها یکی')));
       assert.equal(await page.getByRole('button',{name:'ثبت صورت‌حساب',exact:true}).isDisabled(),true);
     }
-    if(['reports','balance_sheet','cashflow'].includes(view))assert.equal(await page.locator('#content .card strong').filter({hasText:'نامشخص'}).count(),4);
+    if(['reports','balance_sheet','cashflow'].includes(view)&&!health.posting_authorized)assert.equal(await page.locator('#content .card strong').filter({hasText:'نامشخص'}).count(),4);
   }
   phase='logout';
   await page.locator('#logout').click();

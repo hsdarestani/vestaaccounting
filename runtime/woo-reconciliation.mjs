@@ -55,5 +55,5 @@ export async function wooReconciliation(pool,url){
    'rows',coalesce((SELECT jsonb_agg(to_jsonb(display)-'amount_toman') FROM display),'[]'::jsonb),
    'summary',coalesce((SELECT jsonb_agg(to_jsonb(summary)) FROM summary),'[]'::jsonb)
   ) AS result`,[start,end,page*100])).rows[0].result;
- return {...result,margin_review:await paidMarginReview(pool,start,end),start,end};
+ return {...result,rows:result.rows.map(r=>({...r,source_currency:r.currency,currency:r.amount_exact===null?null:'IRT'})),margin_review:await paidMarginReview(pool,start,end),start,end,accounting_currency:'IRT'};
 }

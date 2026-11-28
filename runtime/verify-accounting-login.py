@@ -36,7 +36,7 @@ with open(bootstrap, encoding="utf8") as f:
 headers, health = request("/health")
 assert health["mode"] == "source" and health["database"] == "postgresql"
 assert health["status"] == "ok" and health["version"] == release
-assert health["posting_authorized"] is False and health["store_writes"] is False
+assert isinstance(health["posting_authorized"], bool) and health["store_writes"] is False
 assert headers.get("Cache-Control") == "no-store"
 if origin.startswith("https:"):
     assert headers.get("Strict-Transport-Security")

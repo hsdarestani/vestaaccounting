@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHmac,timingSafeEqual} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
+import {readFile,readdir} from 'node:fs/promises';
+import pg from 'pg';
 import worker from '../edge-demo/worker.mjs';
 import {seedDemo} from '../edge-demo/seed.mjs';
 import {PgBinding,poolFromEnv} from './pg.mjs';
@@ -9,6 +10,7 @@ import {WooSource,persistPage,acceptWebhook,sourceService,normalizeSource} from 
 import {runCycle} from './sync.mjs';
 import {captureOpening} from './opening.mjs';
 import {repairRecentTail} from './tail-repair.mjs';
+import {tomanFromSource} from './currency.mjs';
 const pool=poolFromEnv(),DB=new PgBinding(pool);
 try{
  await pool.query(await readFile(new URL('001_runtime.sql',import.meta.url),'utf8'));
@@ -52,6 +54,7 @@ try{
  await seedDemo(operate);const [dashboard]=await request('/api/dashboard');assert.equal(dashboard.products,8);const [scan]=await request('/api/operate','POST',{kind:'scan'},201);assert.equal(scan.inventory_equal,true);const [bs]=await request('/api/data/balance_sheet');assert.equal(bs.sums.asset-bs.sums.liability-bs.sums.equity-bs.net_profit,0);
  const [sales]=await request('/api/data/sales');await request('/api/details?type=documents&id='+sales.rows[0].id);const [products]=await request('/api/data/products');await request('/api/details?type=products&id='+products.rows[0].id);
  await request('/api/data/ledger?account=1010');await request('/api/data/cashflow');await request('/api/data/customers');await request('/api/data/suppliers');await request('/api/data/profitability');
+ const exactPostingMigration=await readFile(new URL('017_exact_posting.sql',import.meta.url),'utf8');await pool.query(exactPostingMigration);
  // One version may change, but previously captured evidence is immutable.
  await persistPage(pool,'products',[{id:10,name:'Synthetic',sku:'SYN-10',type:'variable',price:'10.00',date_modified_gmt:'2026-01-01T01:00:00',variations:[11]}]);
  await persistPage(pool,'products',[{id:10,name:'Synthetic',sku:'SYN-10',type:'variable',price:'10.00',date_modified_gmt:'2026-01-01T01:00:00',variations:[11]}]);
@@ -93,7 +96,7 @@ try{
  await pool.query("UPDATE sync_state SET status='complete' WHERE kind='variations'");
 
 
- env.MODE='source';const [sourceDashboard]=await request('/api/dashboard');assert.equal(sourceDashboard.posting_authorized,false);assert.equal(sourceDashboard.integration.orders,1);assert.equal(sourceDashboard.integration.initial_complete,true);assert.equal(sourceDashboard.integration.cutover.status,'planned');assert.equal(sourceDashboard.integration.cutover.currency_unit,'TOMAN');assert.equal(sourceDashboard.integration.opening.phase,'frozen_unverified');assert.equal(sourceDashboard.integration.opening.items,1);const [openingRows]=await request('/api/data/opening_review');assert.equal(openingRows.rows.length,1);assert.equal(openingRows.phase,'frozen_unverified');assert.equal(sourceDashboard.integration.refresh_in_progress,false);await pool.query("UPDATE sync_state SET status='running' WHERE kind='variations'");const [duringRefresh]=await request('/api/dashboard');assert.equal(duringRefresh.integration.complete,false);assert.equal(duringRefresh.integration.initial_complete,true);assert.equal(duringRefresh.integration.refresh_in_progress,true);const [duringRefreshRows]=await request('/api/data/integration');assert.ok(duringRefreshRows.rows.some(r=>r.source==='واردات اولیه ووکامرس'&&r.status==='تکمیل‌شده'));assert.ok(duringRefreshRows.rows.some(r=>r.source==='به‌روزرسانی‌های ووکامرس'&&r.status==='در حال دریافت تغییرات'));await pool.query("UPDATE sync_state SET status='complete' WHERE kind='variations'");await request('/api/data/source_orders');const [orderDetail]=await request('/api/source-detail?kind=orders&id=21');assert.equal(orderDetail.record.total,'1230');const [refundDetail]=await request('/api/source-detail?kind=refunds&id=31&parent=21');assert.equal(refundDetail.record.currency,'IRR');await request('/api/source-detail?kind=customers&id=8','GET',null,404);await request('/api/operate','POST',{kind:'sale',ref:'SHOULD-NOT-POST'},403);
+ env.MODE='source';const [sourceDashboard]=await request('/api/dashboard');assert.equal(sourceDashboard.posting_authorized,false);assert.equal(sourceDashboard.integration.orders,1);assert.equal(sourceDashboard.integration.initial_complete,true);assert.equal(sourceDashboard.integration.cutover.status,'planned');assert.equal(sourceDashboard.integration.cutover.currency_unit,'TOMAN');assert.equal(sourceDashboard.integration.opening.phase,'frozen_unverified');assert.equal(sourceDashboard.integration.opening.items,1);const [openingRows]=await request('/api/data/opening_review');assert.equal(openingRows.rows.length,1);assert.equal(openingRows.phase,'frozen_unverified');assert.equal(sourceDashboard.integration.refresh_in_progress,false);await pool.query("UPDATE sync_state SET status='running' WHERE kind='variations'");const [duringRefresh]=await request('/api/dashboard');assert.equal(duringRefresh.integration.complete,false);assert.equal(duringRefresh.integration.initial_complete,true);assert.equal(duringRefresh.integration.refresh_in_progress,true);const [duringRefreshRows]=await request('/api/data/integration');assert.ok(duringRefreshRows.rows.some(r=>r.source==='واردات اولیه ووکامرس'&&r.status==='تکمیل‌شده'));assert.ok(duringRefreshRows.rows.some(r=>r.source==='به‌روزرسانی‌های ووکامرس'&&r.status==='در حال دریافت تغییرات'));await pool.query("UPDATE sync_state SET status='complete' WHERE kind='variations'");await request('/api/data/source_orders');const [orderDetail]=await request('/api/source-detail?kind=orders&id=21');assert.equal(orderDetail.record.total,'123');assert.equal(orderDetail.record.currency,'IRT');assert.equal(orderDetail.source_currency,'IRR');assert.equal((await pool.query("SELECT r.payload->>'total' total FROM raw_current c JOIN raw_revisions r ON r.id=c.revision_id WHERE c.kind='orders' AND c.external_id='21'")).rows[0].total,'1230');const [refundDetail]=await request('/api/source-detail?kind=refunds&id=31&parent=21');assert.equal(refundDetail.record.currency,'IRT');assert.equal(refundDetail.record.amount,'10');assert.equal(refundDetail.source_currency,'IRR');await request('/api/source-detail?kind=customers&id=8','GET',null,404);await request('/api/operate','POST',{kind:'sale',ref:'SHOULD-NOT-POST'},403);
  await pool.query("INSERT INTO opening_input_costs_v1(external_id,unit_cost_toman,cost_status,priority_review,source_kind) VALUES(11,25,'estimate',true,'variations')");
  await pool.query("INSERT INTO opening_input_balances_v1 VALUES('2026-11-26','bank-7640','bank','Synthetic bank',123.45,'Synthetic evidence')");
  await pool.query(openingMigration);
@@ -164,8 +167,8 @@ try{
  const [fractionalSettlement]=await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-2',bank_ref:'SYN-BANK-2',gross_toman:'11.25',net_toman:'10.10',fee_toman:'1.15'},201);
  const [settlementReport]=await request('/api/data/settlement_evidence');
  assert.equal(settlementReport.rows.length,2);assert.equal(settlementReport.summary[0].gross_toman,'121.25');assert.equal(settlementReport.summary[0].net_toman,'110.10');
- assert.equal(settlementReport.rows.find(r=>r.id===fractionalSettlement.id).settlement_status,'fractional_review');
- await request('/api/operate','POST',{kind:'settlement_draft',id:fractionalSettlement.id},409);
+ assert.equal(settlementReport.rows.find(r=>r.id===fractionalSettlement.id).settlement_status,'ready_for_draft');
+ const [fractionalSettlementDraft]=await request('/api/operate','POST',{kind:'settlement_draft',id:fractionalSettlement.id},201);assert.equal((await pool.query('SELECT sum(debit-credit)::text n FROM lines WHERE journal=$1',[fractionalSettlementDraft.id])).rows[0].n,'0.00');
  await pool.query(`INSERT INTO periods(id,title,starts,ends) SELECT 'settlement-ci','Settlement CI','2026-11-25','2026-11-25'
  WHERE NOT EXISTS(SELECT 1 FROM periods WHERE date '2026-11-25' BETWEEN starts AND ends)`);
  const postedBeforeSettlement=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
@@ -198,7 +201,7 @@ try{
  await request('/api/operate','POST',{...settlement,gateway_ref:'SYN-GW-EXPENSE',bank_ref:'EXPENSE-BANK-1'},409);
  const [accruedExpense]=await request('/api/operate','POST',{...expense,expense_account:'5090',funding_account:'2010',supplier_id:'expense-ci-supplier',invoice_ref:'EXPENSE-CI-2',payment_ref:'',amount_toman:'45'},201);
  const [fractionalExpense]=await request('/api/operate','POST',{...expense,invoice_ref:'EXPENSE-CI-3',payment_ref:'EXPENSE-BANK-3',amount_toman:'5.75'},201);
- await request('/api/operate','POST',{kind:'expense_draft',id:fractionalExpense.id},409);
+ const [fractionalExpenseDraft]=await request('/api/operate','POST',{kind:'expense_draft',id:fractionalExpense.id},201);assert.equal((await pool.query('SELECT max(debit)::text n FROM lines WHERE journal=$1',[fractionalExpenseDraft.id])).rows[0].n,'5.75');
  const beforeExpensePosting=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
  const [paidDraft]=await request('/api/operate','POST',{kind:'expense_draft',id:paidExpense.id},201);
  const [paidDraftRepeat]=await request('/api/operate','POST',{kind:'expense_draft',id:paidExpense.id},201);
@@ -227,7 +230,7 @@ try{
  assert.equal(purchaseRepeat.id,purchaseSaved.id);assert.equal(purchaseRepeat.duplicate,true);
  await request('/api/operate','POST',{...expense,invoice_ref:'PURCHASE-CI-1',payment_ref:'PURCHASE-AS-EXPENSE'},409);
  const [fractionalPurchase]=await request('/api/operate','POST',{...purchaseEvidence,invoice_ref:'PURCHASE-CI-2',total_toman:'150.25',items:[{source_kind:'products',external_id:'12',parent_id:'',quantity:3,value_toman:'150.25'}]},201);
- await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:fractionalPurchase.id},409);
+ await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:fractionalPurchase.id},201);
  const beforePurchasePosted=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
  const [purchaseDraft]=await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:purchaseSaved.id},201);
  const [purchaseDraftRepeat]=await request('/api/operate','POST',{kind:'purchase_invoice_draft',id:purchaseSaved.id},201);
@@ -285,7 +288,7 @@ try{
  const [wholeRows]=await request('/api/data/sales_proposals?id=586&start=2026-11-24&end=2026-11-26');
  const whole=wholeRows.rows[0];
  assert.equal(whole.draft_status,'draft_candidate');
- await request('/api/operate','POST',{kind:'woo_revenue_draft',external_id:'580',revision_id:proposal.revision_id},409);
+ await request('/api/operate','POST',{kind:'woo_revenue_draft',external_id:'580',revision_id:proposal.revision_id},201);
  const beforeRevenuePosted=(await pool.query("SELECT count(*) n FROM journals WHERE status='posted'")).rows[0].n;
  const inputDraft={kind:'woo_revenue_draft',external_id:'586',revision_id:whole.revision_id};
  const [revenueDraft]=await request('/api/operate','POST',inputDraft,201);
@@ -387,7 +390,7 @@ try{
  assert.equal(readiness.coverage.balance_missing,0);
  assert.equal(readiness.coverage.balance_fractional,1);
  assert.equal(readiness.coverage.stock_evidence_missing,0);
- assert.equal(readiness.rows.find(r=>r.key==='ledger_precision').status,'required');
+ assert.equal(readiness.rows.find(r=>r.key==='ledger_precision').status,'reviewed');
  assert.equal(readiness.preview.find(r=>r.account==='1012').debit,'98.40');
  assert.equal(readiness.preview.find(r=>r.account==='1200').debit,'198');
  assert.equal(readiness.preview.find(r=>r.account==='3010').credit,'296.40');
@@ -456,7 +459,7 @@ try{
  assert.deepEqual((await pool.query('SELECT account,debit,credit FROM lines WHERE journal=$1 ORDER BY account',[transferDraft.id])).rows,[{account:'1010',debit:0,credit:125},{account:'1012',debit:125,credit:0}]);
  const [transferDraftAgain]=await request('/api/bank-movement','POST',{action:'draft',id:bankSaved.id},201);assert.equal(transferDraftAgain.id,transferDraft.id);assert.equal(transferDraftAgain.duplicate,true);
  const [fractionTransfer]=await request('/api/bank-movement','POST',{...transfer,reference:'BANK-MOVE-FRACTION-OUT',other_reference:'BANK-MOVE-FRACTION-IN',amount_toman:'3.75'},201);
- await request('/api/bank-movement','POST',{action:'draft',id:fractionTransfer.id},409);
+ await request('/api/bank-movement','POST',{action:'draft',id:fractionTransfer.id},201);
  const [bankList]=await request('/api/data/bank_evidence');assert.equal(bankList.rows.find(r=>r.id===bankSaved.id).movement_status,'draft_created');assert.equal(bankList.rows.find(r=>r.id===fractionTransfer.id).amount_toman,'3.75');assert.equal(bankList.posting_authorized,false);
  await assert.rejects(pool.query('UPDATE bank_movement_evidence SET amount_toman=0 WHERE id=$1',[bankSaved.id]),/immutable record/);
  await pool.query(bankMovementMigration);
@@ -474,6 +477,10 @@ try{
  const [reconcileEmpty]=await request('/api/bank-statement','POST',{action:'reconcile',account:'1012'},201);assert.equal(reconcileEmpty.matched,0);
  await assert.rejects(pool.query("UPDATE bank_statement_rows SET amount_toman=1 WHERE reference='BANK-MOVE-IN'"),/immutable record/);
  await pool.query(bankStatementMigration);
+ const [openingGate]=await request('/api/opening-approval');assert.equal(openingGate.ready,false);assert.ok(openingGate.reasons.includes('existing_posted_journals'));
+ await request('/api/opening-approval','POST',{digest:openingGate.digest,scope_confirmed:true,valuation_confirmed:true,note:'Synthetic gate check'},409);
+ await request('/api/controlled-journal','POST',{id:transferDraft.id,stage:'approved',note:'Synthetic preopening',confirmed:true},409);
+ const [currencyCheck]=await request('/api/currency-audit');assert.equal(currencyCheck.accounting_currency,'IRT');assert.equal(currencyCheck.bank.mismatches,0);assert.equal(currencyCheck.opening.cutover_currency,'TOMAN');
 await request('/api/logout','POST',{});await request('/api/dashboard','GET',null,401);
  await request('/api/data/bank_statements','GET',null,401);
  await request('/api/purchase-catalog','GET',null,401);
@@ -507,5 +514,50 @@ await request('/api/logout','POST',{});await request('/api/dashboard','GET',null
  const unknown=await env.integration.dashboard(new URL('https://example.invalid/?start=2025-06-02&end=2025-06-03'));
  assert.equal(unknown.totals.selected.amount,null);assert.equal(unknown.totals.selected.unknown,1);
  assert.equal((await pool.query("SELECT COUNT(*) n FROM journals WHERE status='posted'")).rows[0].n,postedBeforeTail);
+ // Currency conversion is exact, idempotent at the source boundary, and never
+ // mutates the original source record or guesses an unsupported currency.
+ assert.equal(tomanFromSource('12500000','IRR'),'1250000');assert.equal(tomanFromSource('1250000','IRT'),'1250000');assert.equal(tomanFromSource('1.234567','IRR'),'0.1234567');assert.equal(tomanFromSource('-12.55','IRR'),'-1.255');assert.equal(tomanFromSource('123','USD'),null);
+ // Independent synthetic schema exercises a real approval and posting lifecycle.
+ // No test records are created in any production database by deployment.
+ await pool.query('CREATE SCHEMA vesta_activation_ci');
+ const activationPool=new pg.Pool({connectionString:process.env.DATABASE_URL,options:'-c search_path=vesta_activation_ci,public',max:3});
+ try{
+  for(const name of (await readdir(new URL('.',import.meta.url))).filter(n=>/^\d{3}_.+\.sql$/.test(n)).sort())await activationPool.query(await readFile(new URL(name,import.meta.url),'utf8'));
+  const service=sourceService(activationPool),actor='synthetic-owner';
+  await activationPool.query("INSERT INTO periods VALUES('activation-period','Synthetic',date '2026-11-24',date '2027-03-20',0)");
+  const incomplete=await service.openingApprovalPreview();assert.equal(incomplete.ready,false);
+  await activationPool.query('UPDATE sync_control SET last_success=now() WHERE id=1');
+  await activationPool.query("INSERT INTO opening_input_balances_v1 VALUES('2026-11-26','bank-synthetic','bank','Synthetic bank',100.25,'Synthetic statement')");
+  await activationPool.query("INSERT INTO opening_balance_account_links VALUES('2026-11-26','bank-synthetic','1012',NULL)");
+  await activationPool.query("INSERT INTO opening_balance_bridge_evidence(evidence_date,line_key,observed_at,increases_toman,decreases_toman,reference,actor) VALUES('2026-11-26','bank-synthetic','2026-11-26 10:00:00+03:30',0,0,'Synthetic full opening bridge','synthetic-owner')");
+  await persistPage(activationPool,'products',[{id:9001,type:'simple',name:'Synthetic stock',sku:'CI-9001',stock_quantity:3,stock_status:'instock',manage_stock:true,price:'125',currency:'IRT'}]);
+  await activationPool.query("INSERT INTO opening_capture(id,cutover_at,observed_at,last_full_sync_at) VALUES(1,'2026-11-23 20:30:00+00','2026-11-24 09:00:00+03:30',now())");
+  await activationPool.query("INSERT INTO opening_capture_items(capture_id,source_kind,external_id,parent_id,revision_id,source_checked_at,name,sku,stock_quantity,stock_status,manage_stock,price,currency) SELECT 1,'products','9001','',revision_id,now(),'Synthetic stock','CI-9001',3,'instock','true','125','IRT' FROM raw_current WHERE kind='products' AND external_id='9001'");
+  await activationPool.query("INSERT INTO opening_input_costs_v1(external_id,unit_cost_toman,cost_status,priority_review,source_kind) VALUES(9001,10,'owner_entered',false,'products')");
+  await activationPool.query("INSERT INTO opening_stock_reconciliation(capture_id,source_kind,external_id,parent_id,observed_quantity,received_quantity,issued_quantity,observed_at,reference,actor) VALUES(1,'products','9001','',3,0,0,'2026-11-24 09:00:00+03:30','Synthetic complete physical count','synthetic-owner')");
+  const preview=await service.openingApprovalPreview();assert.equal(preview.ready,true,JSON.stringify(preview.reasons));
+  assert.equal((await service.activateOpening({digest:incomplete.digest,scope_confirmed:true,valuation_confirmed:true,note:'Synthetic stale digest'},actor)).status,409);
+  const approved=await service.activateOpening({digest:preview.digest,scope_confirmed:true,valuation_confirmed:true,note:'Synthetic accountant confirmation'},actor);assert.equal(approved.posting_authorized,true);
+  assert.equal((await service.activateOpening({digest:preview.digest,scope_confirmed:true,valuation_confirmed:true,note:'Synthetic replay'},actor)).duplicate,true);
+  assert.equal((await activationPool.query('SELECT sum(debit-credit)::text amount FROM lines WHERE journal=$1',[approved.journal])).rows[0].amount,'0.00');
+  const inventory=(await activationPool.query('SELECT quantity,value_toman::text FROM source_inventory_balances')).rows[0];assert.equal(inventory.quantity,3);assert.equal(Number(inventory.value_toman),30);
+  await assert.rejects(activationPool.query("INSERT INTO purchase_cost_revisions(external_id,unit_cost_toman,reason,actor) VALUES(9001,11,'Synthetic stale correction','synthetic-owner')"),/source opening immutable/);
+  const movement=await service.recordBankMovement({movement_kind:'owner_contribution',movement_date:'2026-11-25',bank_account:'1012',reference:'SYN-ACTIVE-BANK',amount_toman:'10.25',description:'Synthetic bank evidence'},actor);assert.ok(movement.id);
+  const draft=await service.draftBankMovement({id:movement.id},actor);assert.ok(draft.id);
+  const approve={id:draft.id,stage:'approved',note:'Synthetic owner approval',confirmed:true};assert.equal((await service.controlledTransition(approve,actor)).status,409);
+  await assert.rejects(activationPool.query("UPDATE journals SET status='approved',approved_by='synthetic-owner' WHERE id=$1",[draft.id]),/authorization missing/);
+  const statement=await service.importBankStatement({account:'1012',currency:'IRR',rows:[{transaction_date:'2026-11-25',reference:'SYN-ACTIVE-BANK',direction:'credit',amount:'102.50',description:'Synthetic bank statement'}]},actor);assert.equal(statement.matched,1);
+  assert.equal((await service.controlledTransition(approve,actor)).status,'approved');assert.equal((await service.controlledTransition({...approve,stage:'posted'},actor)).status,'posted');
+  assert.equal((await service.controlledTransition({...approve,stage:'posted'},actor)).duplicate,true);
+  const report=await service.ledgerReport('balance_sheet',new URL('https://example.invalid/?end=2026-11-28'));assert.equal(report.verified,true);assert.equal(report.balance_difference,'0');assert.equal(report.sums.asset,'140.5');
+  const ledger=await service.ledgerReport('ledger',new URL('https://example.invalid/?account=1012'));assert.equal(ledger.rows.length,2);assert.equal(ledger.rows[1].debit,'10.25');
+  const manual=await service.manualSourceDraft({ref:'SYN-EXACT',date:'2026-11-26',description:'Synthetic expense adjustment',lines:[{account:'5090',detail:'',debit:'5.123456',credit:'0'},{account:'3020',detail:'',debit:'0',credit:'5.123456'}]},actor);assert.ok(manual.id);
+  for(const stage of ['approved','posted'])assert.equal((await service.controlledTransition({id:manual.id,stage,note:'Synthetic review',confirmed:true},actor)).status,stage);
+  const reverse=await service.reverseManual({id:manual.id,date:'2026-11-27',note:'Synthetic correction',confirmed:true},actor);assert.ok(reverse.id);for(const stage of ['approved','posted'])assert.equal((await service.controlledTransition({id:reverse.id,stage,note:'Synthetic reversal',confirmed:true},actor)).status,stage);
+  const net=await service.ledgerReport('reports',new URL('https://example.invalid/?start=2026-11-24&end=2026-11-28'));assert.equal(net.net_profit,'0');
+  assert.equal((await service.controlPeriod({id:'activation-period',locked:true,note:'Synthetic close',confirmed:true},actor)).locked,true);assert.equal((await service.controlPeriod({id:'activation-period',locked:false,note:'Synthetic reopening',confirmed:true},actor)).locked,false);
+  assert.equal((await activationPool.query("SELECT coalesce(sum(l.debit-l.credit),0)::text amount FROM lines l JOIN journals j ON j.id=l.journal WHERE j.status='posted'")).rows[0].amount,'0.000000');
+  console.log('Controlled opening, exact decimal posting, documentary bank reconciliation, reversal and ledger reports verified in isolated synthetic schema');
+ }finally{await activationPool.end();}
  console.log('PostgreSQL runtime acceptance complete:',checks,'HTTP assertions; immutable revisions, signed webhook replay, bounded sync and posting guard passed');
 }finally{await pool.end();}

@@ -13,7 +13,6 @@ export async function supplierPaymentList(pool,url){
  WITH payments AS (
  SELECT e.id,e.purchase_id,p.invoice_ref,s.name supplier_name,e.payment_date,e.bank_account,e.payment_ref,e.amount_toman::text,e.evidence_note,j.ref draft_ref,
  CASE WHEN d.journal_id IS NOT NULL THEN 'draft_created'
- WHEN mod(e.amount_toman,1)<>0 THEN 'precision_review'
  WHEN NOT EXISTS(SELECT 1 FROM purchase_invoice_drafts x WHERE x.evidence_id=p.id) THEN 'invoice_draft_required'
  WHEN NOT EXISTS(SELECT 1 FROM periods t WHERE e.payment_date BETWEEN t.starts AND t.ends AND t.locked=0) THEN 'period_required'
  ELSE 'draft_candidate' END payment_status
@@ -67,12 +66,12 @@ export async function draftSupplierPayment(pool,b,actor){
  const prior=await conn.query('SELECT journal_id FROM supplier_payment_drafts WHERE evidence_id=$1',[id]);
  if(prior.rowCount){await conn.query('COMMIT');return {id:prior.rows[0].journal_id,duplicate:true};}
  if(!(await conn.query('SELECT 1 FROM purchase_invoice_drafts WHERE evidence_id=$1',[e.purchase_id])).rowCount){await conn.query('ROLLBACK');return fail('ابتدا پیش‌نویس فاکتور خرید را بسازید.',409);}
- const amount=cents(e.amount_exact);if(amount===null||amount%100n!==0n){await conn.query('ROLLBACK');return fail('مبلغ اعشاری گرد نمی‌شود.',409);}
+ const amount=cents(e.amount_exact);if(amount===null){await conn.query('ROLLBACK');return fail('مبلغ دقیق نامعتبر است.',409);}
  const period=await conn.query('SELECT id FROM periods WHERE $1::date BETWEEN starts AND ends AND locked=0 FOR SHARE',[e.payment_date]);
  if(period.rowCount!==1){await conn.query('ROLLBACK');return fail('دوره مالی باز لازم است.',409);}
  const journal=randomUUID(),ref='supplier-payment:'+id;
  await conn.query("INSERT INTO journals(id,ref,date,period,description,actor,at) VALUES($1,$2,$3,$4,'پیش‌نویس پرداخت فاکتور خرید',$5,now()::text)",[journal,ref,e.payment_date,period.rows[0].id,actor]);
- await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'2010',$2,$3,0),($1,$4,$5,0,$3)",[journal,e.supplier_id,String(amount/100n),e.bank_account,id]);
+ await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,'2010',$2,$3,0),($1,$4,$5,0,$3)",[journal,e.supplier_id,decimal(amount),e.bank_account,id]);
  await conn.query('INSERT INTO supplier_payment_drafts(evidence_id,journal_id) VALUES($1,$2)',[id,journal]);
  await conn.query("INSERT INTO audit(at,actor,action,ref,description) VALUES(now()::text,$1,'supplier.payment_draft',$2,'پیش‌نویس بدون ثبت قطعی')",[actor,ref]);
  await conn.query('COMMIT');return {id:journal,duplicate:false};

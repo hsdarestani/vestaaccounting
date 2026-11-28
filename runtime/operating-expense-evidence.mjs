@@ -25,7 +25,6 @@ export async function expenseEvidenceList(pool,url){
   SELECT e.id,e.expense_date,e.expense_account,e.funding_account,e.invoice_ref,e.payment_ref,e.amount_toman::text,e.category_id,coalesce(c.name,'دسته‌بندی نشده') AS category_name,
    e.description,p.name AS supplier_name,j.ref AS draft_ref,
    CASE WHEN d.journal_id IS NOT NULL THEN 'draft_created'
-    WHEN mod(e.amount_toman,1)<>0 THEN 'precision_review'
     WHEN NOT EXISTS(SELECT 1 FROM periods p WHERE e.expense_date BETWEEN p.starts AND p.ends AND p.locked=0) THEN 'period_required'
     ELSE 'draft_candidate' END AS expense_status
    FROM operating_expense_evidence e LEFT JOIN parties p ON p.id=e.supplier_id LEFT JOIN expense_categories c ON c.id=e.category_id
@@ -80,10 +79,10 @@ export async function draftExpense(pool,b,actor){
   const prior=await conn.query('SELECT journal_id FROM operating_expense_drafts WHERE evidence_id=$1',[id]);
   if(prior.rowCount){await conn.query('COMMIT');return {id:prior.rows[0].journal_id,duplicate:true};}
   const n=cents(e.amount_exact);
-  if(n===null||n%100n!==0n){await conn.query('ROLLBACK');return err('دفتر فعلی فقط تومان صحیح می‌پذیرد؛ مبلغ گرد نمی‌شود.',409);}
+  if(n===null){await conn.query('ROLLBACK');return err('مبلغ دقیق نامعتبر است.',409);}
   const period=await conn.query('SELECT id FROM periods WHERE $1::date BETWEEN starts AND ends AND locked=0 FOR SHARE',[e.expense_date]);
   if(period.rowCount!==1){await conn.query('ROLLBACK');return err('دوره مالی باز لازم است.',409);}
-  const j=randomUUID(),ref='expense-evidence:'+id,amount=String(n/100n);
+  const j=randomUUID(),ref='expense-evidence:'+id,amount=decimal(n);
   await conn.query("INSERT INTO journals(id,ref,date,period,description,actor,at) VALUES($1,$2,$3,$4,'پیش‌نویس هزینه عملیاتی مستند',$5,now()::text)",[j,ref,e.expense_date,period.rows[0].id,actor]);
   await conn.query("INSERT INTO lines(journal,account,detail,debit,credit) VALUES($1,$2,$3,$4,0),($1,$5,$6,0,$4)",[j,e.expense_account,id,amount,e.funding_account,e.supplier_id||id]);
   await conn.query('INSERT INTO operating_expense_drafts(evidence_id,journal_id) VALUES($1,$2)',[id,j]);
