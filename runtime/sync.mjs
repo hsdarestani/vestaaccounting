@@ -3,6 +3,7 @@ import {poolFromEnv} from './pg.mjs';
 import {WooSource,persistPage} from './source.mjs';
 import {captureOpening} from './opening.mjs';
 import {repairRecentTail} from './tail-repair.mjs';
+import {runWooJournalQueue} from './woo-journal-queue.mjs';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const kinds=['products','orders','customers','categories','coupons','variations','refunds'];
 const stamp=()=>new Date().toISOString().replace(/\.\d{3}Z$/,'Z');
@@ -131,4 +132,4 @@ if(process.argv[1]&&import.meta.url===new URL('file:'+process.argv[1]).href){con
     lastTailProbe=Date.now();
   }
  }catch(e){lastTailProbe=Date.now()-210000;console.error(JSON.stringify({event:'recent_source_identity_probe_failed',class:e?.name||'Error'}));}}
- const result=await runCycle(pool,source,{budget:9,delay:1800});console.log(JSON.stringify({event:'source_sync',...result}));await sleep(result.failed?90000:result.idle?60000:25000);}}
+ const result=await runCycle(pool,source,{budget:9,delay:1800});console.log(JSON.stringify({event:'source_sync',...result}));if(!result.failed){try{const queue=await runWooJournalQueue(pool);console.log(JSON.stringify({event:'woo_journal_queue',...queue}));}catch(e){console.error(JSON.stringify({event:'woo_journal_queue_error',class:e?.name||'Error'}));}}await sleep(result.failed?90000:result.idle?60000:25000);}}

@@ -225,6 +225,14 @@ try {
       await file.setInputFiles({name:'preview-invalid.csv',mimeType:'text/csv',buffer:Buffer.from('تاریخ,مرجع,واریز,برداشت,شرح\n۱۴۰۵/۰۹/۰۵,PREVIEW-ONLY,۱۲۵۰,۱۰,نمونه')});await page.waitForFunction(()=>Array.from(document.querySelectorAll('#content .hint')).some(x=>x.textContent.includes('تنها یکی')));
       assert.equal(await page.getByRole('button',{name:'ثبت صورت‌حساب',exact:true}).isDisabled(),true);
     }
+    if(view==='stock_adjustments'){
+      const response=await page.request.get(url+'/api/data/stock_adjustments');assert.equal(response.status(),200);
+      await page.getByRole('button',{name:'ثبت مدرک اصلاح موجودی',exact:true}).waitFor();await page.locator('#content select[name=event_kind]').selectOption('adjustment_in');assert.equal(await page.locator('#content input[name=value_toman]').isVisible(),true);
+      await page.locator('#content select[name=event_kind]').selectOption('damage');assert.equal(await page.locator('#content input[name=value_toman]').isVisible(),false);
+    }
+    if(view==='woo_journal_queue'){
+      const response=await page.request.get(url+'/api/data/woo_journal_queue');assert.equal(response.status(),200);assert.ok(Array.isArray((await response.json()).summary));await page.getByRole('button',{name:'اجرای صف و بررسی مجدد',exact:true}).waitFor();
+    }
     if(['reports','balance_sheet','cashflow'].includes(view)&&!health.posting_authorized)assert.equal(await page.locator('#content .card strong').filter({hasText:'نامشخص'}).count(),4);
   }
   phase='logout';
