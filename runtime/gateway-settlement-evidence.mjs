@@ -50,6 +50,7 @@ export async function recordSettlement(pool,b,actor){
   if(!bounds.rowCount){await client.query('ROLLBACK');return invalid('تاریخ خارج از بازه حسابداری است.');}
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[bank+':'+bankRef]);
   if((await client.query('SELECT 1 FROM operating_expense_evidence WHERE funding_account=$1 AND payment_ref=$2',[bank,bankRef])).rowCount){await client.query('ROLLBACK');return invalid('این مرجع بانک در هزینه عملیاتی ثبت شده است.',409);}
+  if((await client.query('SELECT 1 FROM supplier_payment_evidence WHERE bank_account=$1 AND payment_ref=$2',[bank,bankRef])).rowCount){await client.query('ROLLBACK');return invalid('مرجع بانک در پرداخت تأمین‌کننده ثبت شده است.',409);}
   const args=[gateway,bank,gatewayRef,bankRef,date,decimal(gross),decimal(net),decimal(fee),note,basis];
   const result=await client.query(`INSERT INTO gateway_settlement_evidence
     (id,gateway_account,bank_account,gateway_ref,bank_ref,settlement_date,gross_toman,net_toman,fee_toman,evidence_note,ledger_basis,actor)
