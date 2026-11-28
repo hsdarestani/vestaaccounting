@@ -37,7 +37,7 @@ export async function recordBankMovement(pool,b,actor){
   for(const [a,r] of refs){if((await conn.query(`SELECT 1 FROM bank_movement_references WHERE account=$1 AND reference=$2
    UNION ALL SELECT 1 FROM gateway_settlement_evidence WHERE bank_account=$1 AND bank_ref=$2
    UNION ALL SELECT 1 FROM operating_expense_evidence WHERE funding_account=$1 AND payment_ref=$2
-   UNION ALL SELECT 1 FROM supplier_payment_evidence WHERE bank_account=$1 AND payment_ref=$2 UNION ALL SELECT 1 FROM woo_collection_evidence WHERE collection_kind='bank' AND account=$1 AND reference=$2`,[a,r])).rowCount){await conn.query('ROLLBACK');return fail('مرجع گردش بانک یا صندوق قبلاً در بخش دیگری ثبت شده است.',409);}}
+   UNION ALL SELECT 1 FROM supplier_payment_evidence WHERE bank_account=$1 AND payment_ref=$2 UNION ALL SELECT 1 FROM bank_statement_candidates WHERE source_kind IN('woo_collection','woo_refund_payment') AND account=$1 AND reference=$2`,[a,r])).rowCount){await conn.query('ROLLBACK');return fail('مرجع گردش بانک یا صندوق قبلاً در بخش دیگری ثبت شده است.',409);}}
   const id=randomUUID();await conn.query(`INSERT INTO bank_movement_evidence(id,movement_kind,movement_date,bank_account,other_bank_account,reference,other_reference,party_id,amount_toman,description,actor)
    VALUES($10,$1,$2,$3,$4,$5,$6,$7,$8,$9,$11)`,[...values,id,actor]);
   for(const [a,r] of refs)await conn.query('INSERT INTO bank_movement_references(account,reference,movement_id) VALUES($1,$2,$3)',[a,r,id]);

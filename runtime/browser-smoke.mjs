@@ -189,6 +189,10 @@ try {
       await page.getByText('ناخالص ۱۰ تومان · خالص ۹ تومان · کارمزد و مالیات ۱ تومان',{exact:true}).waitFor();
       console.log('browser_woo_collection_toman_verified=true');
     }
+    if(view==='refund_payments'){
+      const r=await page.request.get(url+'/api/data/refund_payments');assert.equal(r.status(),200);assert.ok(Array.isArray((await r.json()).rows));
+      await page.getByRole('button',{name:'ثبت مدرک پرداخت استرداد',exact:true}).waitFor();await page.locator('select[name=method]').selectOption('gateway');await page.locator('select[name=source_currency]').selectOption('IRR');await page.locator('input[name=source_amount]').fill('12500000');await page.getByText('مبلغ پرداخت: ۱٬۲۵۰٬۰۰۰ تومان',{exact:true}).waitFor();console.log('browser_refund_payment_toman_verified=true');
+    }
     if(view==='woo_reconciliation'){
       const activity=await page.request.get(url+'/api/data/woo_reconciliation');
       assert.equal(activity.status(),200);

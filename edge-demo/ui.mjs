@@ -18,13 +18,14 @@ function browserApp(){
   sourceNav.push(['bank_statements','▤','صورت‌حساب و تطبیق بانک']);
   sourceNav.push(['stock_adjustments','▣','برگشت فیزیکی و اصلاح موجودی'],['woo_journal_queue','↻','صف خودکار اسناد فروش']);
   sourceNav.push(['woo_collections','◉','دریافت سفارش و گزارش درگاه']);
+  sourceNav.push(['refund_payments','⇄','پرداخت استرداد مشتری']);
   sourceNav.forEach(([key,icon,label])=>names[key]=label);
   const navigation=[
     ['داشبورد','▦',['dashboard']],
     ['فروش','◈',['source_orders','sales','refund_review','sales_proposals','woo_journal_queue']],
     ['خرید','▧',['purchase_invoice_evidence','supplier_payment_evidence','purchases']],
     ['هزینه‌ها','◳',['expense_evidence','expenses']],
-    ['بانک و صندوق','▰',['bank_evidence','bank_statements','woo_collections','bank','payments','settlement_evidence','gateways','settlements']],
+    ['بانک و صندوق','▰',['bank_evidence','bank_statements','woo_collections','refund_payments','bank','payments','settlement_evidence','gateways','settlements']],
     ['انبار و کالاها','▣',['source_products','source_variations','inventory','movements','stock_adjustments','products']],
     ['طرف حساب‌ها','♙',['customers','suppliers']],
     ['حسابداری','◫',['journals','accounts','ledger','periods']],
@@ -99,6 +100,7 @@ function browserApp(){
   cols.purchase_invoice_evidence=['purchase_date','supplier_name','invoice_ref','total_toman','purchase_items','purchase_status','draft_ref','evidence_note'];
   cols.purchase_invoice_evidence.splice(4,0,'payment_mode','initial_paid_toman','outstanding_toman','due_date');
   cols.woo_collections=['collection_date','order_id','collection_kind','account','reference','gross_toman','net_toman','commission_toman','commission_tax_toman','draft_ref','journal_status','evidence_note'];
+  cols.refund_payments=['payment_date','order_id','refund_id','account','reference','amount_toman','draft_ref','journal_status','evidence_note'];
   Object.assign(labels,{collection_date:'تاریخ دریافت',collection_kind:'روش دریافت',commission_toman:'کارمزد',commission_tax_toman:'مالیات کارمزد',payment_mode:'نوع خرید',initial_paid_toman:'پرداخت اولیه',due_date:'سررسید'});
   Object.assign(labels,{payment_mode:'روش پرداخت',initial_paid_toman:'پرداخت اولیه (تومان)',due_date:'سررسید بدهی'});
   Object.assign(labels,{purchase_date:'تاریخ دریافت کالا',purchase_items:'اقلام دریافت‌شده',purchase_status:'وضعیت سند',total_toman:'مبلغ کل (تومان)'});
@@ -144,6 +146,7 @@ function browserApp(){
   monetaryFields.push('price','regular_price','sale_price','discount_total','discount_tax','shipping_total','shipping_tax','total_tax','subtotal_tax','tax_total','shipping_tax_total','amount');
   monetaryFields.push('initial_paid_toman');dateFields.push('due_date');
   monetaryFields.push('commission_toman','commission_tax_toman');dateFields.push('collection_date');financialReports.push('woo_collections');paginatedReports.push('woo_collections');
+  financialReports.push('refund_payments');paginatedReports.push('refund_payments');
   Object.assign(labels,{price:'قیمت (تومان)',currency:'واحد مبلغ',discount_total:'تخفیف (تومان)',shipping_total:'ارسال (تومان)',total_tax:'مالیات (تومان)',amount:'مبلغ / درصد تخفیف',discount_tax:'مالیات تخفیف (تومان)'});
   const moneyText=v=>v===null||v===undefined?'نامشخص':fmt(v)+' تومان';
   const columnTitle=k=>{const label=labels[k]||k;return (moneyFields.has(k)||monetaryFields.includes(k))&&!['expected','observed','amount'].includes(k)&&!label.includes('تومان')?label+' (تومان)':label;};
@@ -158,7 +161,7 @@ function browserApp(){
     if(['event_at','checked_at'].includes(k))return jalali(v);
     if(k==='currency')return v==='IRT'?'تومان':v==='IRR'?'ریال (ارز اولیه منبع)':'نامشخص';
     if(k==='amount'&&current==='source_coupons')return v==null?'نامشخص':fmt(v);
-    if(k==='account'&&['bank_statements','woo_collections'].includes(current))return opts.accounts.find(a=>a.code===v)?.title||v;
+    if(k==='account'&&['bank_statements','woo_collections','refund_payments'].includes(current))return opts.accounts.find(a=>a.code===v)?.title||v;
     if(k==='transaction_date')return jalali(v);
     if(k==='direction')return ({credit:'واریز',debit:'برداشت'})[v]||'—';
     if(k==='match_status')return ({matched:'تطبیق‌شده',exact_pending:'تطبیق دقیق آماده',conflict:'تعارض مرجع',review:'نیازمند تأیید',unmatched:'بدون مدرک مرتبط'})[v]||'—';
@@ -267,7 +270,7 @@ function browserApp(){
     form.addEventListener('submit',async e=>{e.preventDefault();if(!d.ready||!window.confirm('افتتاحیه قطعی و غیرقابل بازنویسی است. مدارک کامل و تأیید حسابدار را دارید؟'))return;submit.disabled=true;try{await api('/opening-approval','POST',{digest:d.digest,scope_confirmed:scope.checked,valuation_confirmed:valuation.checked,note:note.value});postingActive=true;await go('financial_readiness');msg('افتتاحیه متوازن قطعی و دفتر فعال شد.');}catch(err){msg(err.message,true);}finally{submit.disabled=!d.ready;}});
     return panel('کنترل و تأیید افتتاحیه','تنها پس از تکمیل مدارک واقعی، تأیید صریح مالک و بازبینی حسابدار امکان تهیه سند قطعی وجود دارد.',form);
   }
-  async function currencyAuditPanel(){const d=await api('/currency-audit');return panel('کنترل ارز و واحد تومان','تمام مبالغ دفتر به تومان است؛ مقدار و ارز خام در شواهد منبع محفوظ است. قیمت و مانده افتتاحیه از ستون‌های تومان وارد شده‌اند؛ تطبیق با اسناد اصلی همچنان لازم است.',grid(card('قیمت‌های واردشده',d.opening.cost_rows,'▣','','قلم'),card('مانده‌های واردشده',d.opening.balance_rows,'▰','','ردیف'),card('اختلاف تبدیل صورت‌حساب',d.bank.mismatches,'✓','','ردیف')),table(d.source,['kind','currency','count']));}
+  async function currencyAuditPanel(){const d=await api('/currency-audit');return panel('کنترل ارز و واحد تومان','تمام مبالغ دفتر به تومان است؛ مقدار و ارز خام در شواهد منبع محفوظ است. قیمت و مانده افتتاحیه از ستون‌های تومان وارد شده‌اند؛ تطبیق با اسناد اصلی همچنان لازم است.',grid(card('قیمت‌های واردشده',d.opening.cost_rows,'▣','','قلم'),card('مانده‌های واردشده',d.opening.balance_rows,'▰','','ردیف'),card('اختلاف تبدیل صورت‌حساب',d.bank.mismatches,'✓','','ردیف'),card('اختلاف تبدیل دریافت سفارش',d.collections.mismatches,'✓','','ردیف'),card('اختلاف تبدیل استرداد',d.refunds.mismatches,'✓','','ردیف')),table(d.source,['kind','currency','count']));}
   function manualPartyForm(module){
     const kind=module==='customers'?'customer':'supplier',name=el('input'),note=el('textarea'),form=el('form'),fields=el('div',undefined,'forms');
     name.required=true;name.maxLength=180;note.maxLength=180;note.placeholder='شماره تماس یا توضیح اختیاری';const ref='manual-'+crypto.randomUUID();
@@ -337,6 +340,12 @@ function browserApp(){
     const template=button('دانلود قالب گزارش CSV',()=>{const a=el('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+headers.join(',')+'\r\n'],{type:'text/csv;charset=utf-8'}));a.download='vesta-gateway-collections-template.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
     return panel('ثبت دریافت سفارش','واریز مستقیم از صورت‌حساب واردشده انتخاب می‌شود. دریافت درگاه فقط از گزارش واقعی با تفکیک کارمزد و مالیات ثبت می‌شود. هر دریافت از فروش و تسویه بانکی مستقل است.',form,panel('ورود گروهی گزارش درگاه','فایل گزارش را به قالب CSV در Excel تبدیل کنید. پیش‌نمایش فقط نرخ تبدیل دقیق و مبالغ تومان را نشان می‌دهد؛ هر دسته ثبت اتمیک است و تکرار مرجع کنترل می‌شود.',template,bulk));
   }
+  function refundPaymentForm(){const form=el('form'),fields=el('div',undefined,'forms'),q=el('input'),candidates=el('select'),bankQ=el('input'),bankRows=el('select'),confirm=el('input'),preview=el('p','','hint');confirm.type='checkbox';confirm.required=true;candidates.required=true;bankRows.required=true;let refunds=[];
+    const defs=[{k:'method',t:'روش پرداخت',type:'select',choices:[['bank','برداشت بانکی'],['gateway','گزارش استرداد درگاه']]},{k:'account',t:'حساب درگاه',type:'select',choices:opts.accounts.filter(a=>['1310','1320','1330','1340','1350','1390'].includes(a.code)).map(a=>[a.code,a.title])},{k:'reference',t:'مرجع استرداد درگاه',type:'text'},{k:'payment_date',t:'تاریخ واقعی شمسی',type:'text'},{k:'source_currency',t:'واحد گزارش اولیه',type:'select',choices:[['IRT','تومان'],['IRR','ریال']]},{k:'source_amount',t:'مبلغ گزارش اصلی',type:'text'},{k:'evidence_note',t:'توضیح و مدرک',type:'text'}];defs.forEach(d=>fields.append(field({...d,required:true})));const method=fields.querySelector('[name=method]');const latin=v=>String(v??'').trim().replace(/[۰-۹٠-٩]/g,d=>String(d.charCodeAt(0)%16)).replace(/[٬,\s]/g,'').replace(/٫/g,'.');
+    const bankBox=add(el('div',undefined,'forms'),add(el('label','جستجوی مرجع برداشت'),bankQ,button('جستجوی برداشت',async()=>{const d=await api('/refund-bank-rows?q='+encodeURIComponent(latin(bankQ.value)));bankRows.replaceChildren(el('option','انتخاب برداشت'));bankRows.firstChild.value='';for(const r of d.rows){const o=el('option',r.reference+' · '+moneyText(r.amount_toman)+' · '+jalali(r.transaction_date));o.value=r.id;bankRows.append(o);}})),add(el('label','برداشت تطبیق‌نشده'),bankRows));
+    const lookup=async()=>{const d=await api('/refund-payment-candidates?q='+encodeURIComponent(latin(q.value)));refunds=d.rows.filter(r=>/[1-9]/.test(r.remaining_toman));candidates.replaceChildren(el('option','انتخاب بدهی استرداد'));candidates.firstChild.value='';refunds.forEach((r,i)=>{const o=el('option','سفارش '+fmt(r.order_id)+' · استرداد '+fmt(r.refund_id)+' · باقیمانده '+moneyText(r.remaining_toman));o.value=String(i);candidates.append(o);});};
+    const update=()=>{const g=method.value==='gateway';bankBox.hidden=g;bankRows.disabled=g;for(const d of defs.slice(1,-1)){const n=fields.querySelector('[name='+d.k+']');n.disabled=!g;n.required=g;n.parentElement.hidden=!g;}preview.textContent='';if(g){const b=Object.fromEntries(new FormData(form)),s=latin(b.source_amount);if(/^\d{1,14}(\.\d{1,6})?$/.test(s)){const [a,f='']=s.split('.');let n=BigInt(a)*1000000n+BigInt(f.padEnd(6,'0'));if(b.source_currency==='IRR'){if(n%10n){preview.textContent='دقت بیش از شش رقم اعشار تومان است.';return;}n/=10n;}preview.textContent='مبلغ پرداخت: '+moneyText(String(n/1000000n)+'.'+String(n%1000000n).padStart(6,'0'));}}};
+    const submit=el('button','ثبت مدرک پرداخت استرداد','primary');submit.type='submit';form.append(add(el('div',undefined,'forms'),add(el('label','شماره سفارش یا استرداد'),q,button('جستجوی بدهی استرداد',lookup)),add(el('label','بدهی قطعی استرداد'),candidates)),fields,bankBox,preview,add(el('label','پرداخت واقعی و مدرک آن را تأیید می‌کنم.'),confirm),submit);fields.addEventListener('input',update);fields.addEventListener('change',update);update();form.addEventListener('submit',async e=>{e.preventDefault();submit.disabled=true;try{const b=Object.fromEntries(new FormData(form)),r=refunds[Number(candidates.value)];if(!r||candidates.value==='')throw Error('بدهی قطعی استرداد را انتخاب کنید.');const payload={order_id:r.order_id,refund_id:r.refund_id,evidence_note:b.evidence_note,confirmed:confirm.checked};if(b.method==='bank')payload.statement_id=bankRows.value;else Object.assign(payload,{account:b.account,reference:b.reference,payment_date:localizedDates.parse(b.payment_date),source_currency:b.source_currency,source_amount:latin(b.source_amount)});await api('/refund-payment','POST',payload);await go('refund_payments');msg('مدرک پرداخت ذخیره شد؛ سند قطعی نیست.');}catch(err){msg(err.message,true);}finally{submit.disabled=false;}});return panel('پرداخت بدهی استرداد','ابتدا سند برگشت فروش و بخش وصول‌شده قطعی شود. سپس برداشت واقعی بانک یا گزارش استرداد درگاه را انتخاب کنید. پرداخت می‌تواند جزئی باشد و فروش یا انبار دوباره تغییر نمی‌کند.',form);}
   function stockBulkPanel(){
     const headers=['کد ردیف','نام کالا','SKU','تعداد مرجع ووکامرس (اطلاع)','شمارش واقعی','کل ورود','کل خروج'];
     const quote=v=>'"'+String(v??'').replace(/^[=+\-@\t\r]/,x=>"'"+x).replaceAll('"','""')+'"';
@@ -624,6 +633,9 @@ function browserApp(){
         const actions=role==='owner'?shown.filter(r=>!r.draft_ref).map(r=>button('پیش‌نویس دریافت '+r.reference,async()=>{await api('/woo-collection','POST',{action:'draft',id:r.id});await refresh();msg('پیش‌نویس دریافت ذخیره شد؛ هنوز قطعی نیست.');})):[];
         chartCards.replaceChildren(...(role==='owner'?[wooCollectionForm()]:[]),panel('دریافت‌های مستند','ثبت قطعی پس از فروش قطعی و کنترل مانده دریافتنی انجام می‌شود.',...actions));
       }
+      if(m==='refund_payments'){
+        chartCards.replaceChildren(...(role==='owner'?[refundPaymentForm()]:[]),panel('پرداخت‌های مستند استرداد','تنها ثبت قطعی سند پرداخت، بدهی استرداد را کاهش می‌دهد.',...(role==='owner'?shown.filter(r=>!r.draft_ref).map(r=>button('پیش‌نویس استرداد '+r.reference,async()=>{await api('/refund-payment','POST',{action:'draft',id:r.id});await refresh();msg('پیش‌نویس پرداخت استرداد ایجاد شد.');})):[])));
+      }
       if(m==='stock_adjustments'){
         chartCards.replaceChildren(panel('اصلاح‌های مستند','تغییر انبار فقط با ثبت قطعی و کنترل تاریخ انجام می‌شود.',...(role==='owner'&&d.posting_authorized?shown.filter(r=>!r.journal_ref).map(r=>button('ثبت قطعی اصلاح '+r.reference,async()=>{const note=prompt('مدرک و علت تأیید ارزش');if(!note||!window.confirm('نوع، تعداد و سیاست میانگین موزون تأیید می‌شود؟'))return;await api('/inventory-posting','POST',{action:'adjustment_post',id:r.id,note,confirmed:true,valuation_confirmed:true});await refresh();msg('اصلاح و سند انبار قطعی شد.');})):[])));
       }
@@ -640,7 +652,8 @@ function browserApp(){
           if(!window.confirm('فقط اگر مبلغ مربوط به این استرداد هنوز در حساب دریافتنی وصول نشده و هیچ پرداخت یا استرداد وجه ثبت نشده است، تأیید کنید. این عمل فقط پیش‌نویس اصلاح دریافتنی می‌سازد.'))return;
           await operate({kind:'woo_refund_draft',order_id:r.order_id,refund_id:r.refund_id,revision_id:r.revision_id,uncollected_receivable_confirmed:true});await refresh();msg('پیش‌نویس برگشت فروش ذخیره شد؛ ثبت قطعی، پرداخت و انبار تغییر نکردند.');
         })):[];
-        chartCards.replaceChildren(panel('بررسی استرداد کامل و جزئی','فقط برگشت مستند کالا و مالیات نسبت به پیش‌نویس فروش اولیه بررسی می‌شود. برگشت ارسال، اصلاح مالی بدون کالا، استرداد وجه پرداخت‌شده و بازگشت فیزیکی انبار نیازمند رسیدگی جداگانه‌اند.',...candidates));
+        const paid=role==='owner'?shown.filter(r=>r.draft_status==='receivable_reversal_candidate').map(r=>{const n=el('input');n.placeholder='بخش وصول‌شده به تومان';n.inputMode='decimal';return add(el('div',undefined,'action-alert'),el('p','استرداد '+fmt(r.refund_id)+' · '+moneyText(r.refund_toman)),n,button('پیش‌نویس بدهی استرداد',async()=>{const v=n.value.trim().replace(/[۰-۹٠-٩]/g,d=>String(d.charCodeAt(0)%16)).replace(/[٬,\s]/g,'').replace(/٫/g,'.');if(!/^\d+(\.\d{1,6})?$/.test(v)||!/[1-9]/.test(v))throw Error('مبلغ بخش وصول‌شده را وارد کنید.');if(!window.confirm('این مبلغ از دریافت قطعی سفارش تأیید شده و باید به مشتری مسترد شود؟'))return;await operate({kind:'woo_refund_draft',order_id:r.order_id,refund_id:r.refund_id,revision_id:r.revision_id,paid_refund_confirmed:true,paid_toman:v});await refresh();msg('پیش‌نویس بدهی استرداد ذخیره شد؛ هنوز وجهی پرداخت نشده است.');}));}):[];
+        chartCards.replaceChildren(panel('بررسی استرداد کامل و جزئی','برگشت مستند کالا و مالیات در برابر فروش اولیه. بخش وصول‌نشده از دریافتنی کسر و بخش وصول‌شده به بدهی استرداد منتقل می‌شود؛ پرداخت واقعی و بازگشت فیزیکی مستقل هستند.',...candidates,...paid,button('پرداخت استرداد قطعی',()=>go('refund_payments'))));
       }
       if(m==='supplier_payment_evidence'){
         const summaryCols=['bank_account','count','amount_toman'];

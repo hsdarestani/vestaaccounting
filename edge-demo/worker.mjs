@@ -158,6 +158,10 @@ export default {async fetch(req,env){try{
   if(real&&path==='/api/stock-return-candidates'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.stockReturnCandidates(url.searchParams.get('q')));}
   if(real&&path==='/api/data/woo_journal_queue'&&req.method==='GET')return json(await env.integration.wooJournalQueue(url));
   if(real&&path==='/api/data/woo_collections'&&req.method==='GET')return json(await env.integration.collections(url));
+  if(real&&path==='/api/data/refund_payments'&&req.method==='GET')return json(await env.integration.refundPaymentList(url));
+  if(real&&path==='/api/refund-payment-candidates'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.refundPaymentCandidates(url.searchParams.get('q')));}
+  if(real&&path==='/api/refund-bank-rows'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.refundBankRows(url.searchParams.get('q')));}
+  if(real&&path==='/api/refund-payment'&&req.method==='POST'){check(u.role==='owner','مجوز عملیات ندارید',403);const b=await body(req);const r=await (b.action==='draft'?env.integration.draftRefundPayment(b,u.actor):env.integration.recordRefundPayment(b,u.actor));return json(r,typeof r.status==='number'?r.status:201);}
   if(real&&path==='/api/collection-orders'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.collectionOrders(url.searchParams.get('q')));}
   if(real&&path==='/api/collection-bank-rows'&&req.method==='GET'){check(u.role==='owner','مجوز مشاهده ندارید',403);return json(await env.integration.collectionBankRows(url.searchParams.get('q')));}
   if(real&&path==='/api/woo-collection'&&req.method==='POST'){check(u.role==='owner','مجوز عملیات ندارید',403);const b=await body(req);const r=await (b.action==='draft'?env.integration.draftWooCollection(b,u.actor):b.action==='import'?env.integration.importGatewayCollections(b,u.actor):env.integration.recordWooCollection(b,u.actor));return json(r,typeof r.status==='number'?r.status:201);}
